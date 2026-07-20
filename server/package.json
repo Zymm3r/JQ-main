@@ -6,6 +6,11 @@
         "start": "node index.js",
         "migrate:multi-tenant": "node migrate_multi_tenant.js",
         "migrate:membership": "node migrate_membership.js",
+        "migrate:milestone2": "node migrate_milestone2.js",
+        "migrate:milestone3": "node migrate_milestone3.js",
+        "migrate:milestone4": "node migrate_milestone4.js",
+        "migrate:milestone6": "node migrate_milestone6.js",
+        "migrate:milestone7": "node migrate_milestone7.js",
         "test": "node --test"
     },
     "keywords": [],

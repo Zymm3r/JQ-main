@@ -91,7 +91,7 @@ export default function CustomerQueue() {
                 </div>
 
                 <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                    <p><strong>คุณ:</strong> {queue.customer_name}</p>
+                    <p><strong>คุณ:</strong> {queue.customerName}</p>
                     <p style={{ fontSize: '0.9rem', color: 'var(--text-light)' }}>{queue.pax} ท่าน</p>
                 </div>
 

@@ -20,9 +20,9 @@ test('legacy store remains the default tenant', () => {
     assert.throws(() => normalizeStoreId('../other-store'), /INVALID_STORE_ID/);
 });
 
-test('queue, counter and setting uniqueness is tenant scoped', () => {
-    assert.ok(hasUniqueIndex(Queue, { storeId: 1, sessionId: 1, queueNumber: 1 }));
-    assert.ok(hasUniqueIndex(Counter, { storeId: 1, sessionId: 1 }));
+test('queue and counter uniqueness is tenant and branch scoped', () => {
+    assert.ok(hasUniqueIndex(Queue, { storeId: 1, branchId: 1, sessionId: 1, queueNumber: 1 }));
+    assert.ok(hasUniqueIndex(Counter, { storeId: 1, branchId: 1, sessionId: 1 }));
     assert.ok(hasUniqueIndex(Setting, { storeId: 1, key: 1 }));
     assert.ok(hasUniqueIndex(LineUser, { storeId: 1, lineUserId: 1 }));
 });

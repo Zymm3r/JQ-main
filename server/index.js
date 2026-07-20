@@ -11,16 +11,25 @@ const Queue = require('./models/Queue');
 const Setting = require('./models/Setting');
 const Counter = require('./models/Counter');
 const Store = require('./models/Store');
+const StoreSetting = require('./models/StoreSetting');
+const { getActiveSession, resetSession } = require('./services/queueSessionService');
 const { initDb } = require('./database');
 const { DEFAULT_STORE_ID, normalizeStoreId } = require('./config');
 const { getSetting, setSetting } = require('./services/settingsService');
 const { loginAdmin, requireAdmin } = require('./services/adminAuth');
+const { verifyAccountToken } = require('./services/accountAuth');
 const authRoutes = require('./routes/authRoutes');
 const merchantRoutes = require('./routes/merchantRoutes');
 const platformRoutes = require('./routes/platformRoutes');
+const createPublicQueueRoutes = require('./routes/publicQueueRoutes');
+const createStoreQueueRoutes = require('./routes/storeQueueRoutes');
+const qrRoutes = require('./routes/qrRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
+const teamRoutes = require('./routes/teamRoutes');
 const { refreshSubscriptionState, subscriptionAllowsQueue } = require('./services/subscriptionService');
 
-const { pushMessage, client: lineClient } = require('./lineService');
+const { client: lineClient } = require('./lineService');
+const NotificationService = require('./services/notificationService');
 const line = require('@line/bot-sdk');
 
 const app = express();
@@ -48,7 +57,8 @@ app.get('/ping', (req, res) => {
 app.get('/health', (req, res) => {
     res.status(databaseReady ? 200 : 503).json({
         status: databaseReady ? 'ready' : 'starting',
-        database: databaseReady ? 'connected' : 'disconnected'
+        database: databaseReady ? 'connected' : 'disconnected',
+        lineWebhook: lineWebhookEnabled ? 'enabled' : 'disabled'
     });
 });
 
@@ -57,22 +67,29 @@ const lineConfig = {
     channelAccessToken: process.env.LINE_CHANNEL_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET,
 };
+const lineWebhookEnabled = Boolean(lineConfig.channelAccessToken && lineConfig.channelSecret);
 
 // Webhook Route
-app.post('/webhook', line.middleware(lineConfig), (req, res) => {
-    Promise.all(req.body.events.map(handleEvent))
-        .then((result) => res.json(result))
-        .catch((err) => {
-            console.error(err);
-            res.status(500).end();
-        });
-});
+if (lineWebhookEnabled) {
+    app.post('/webhook', line.middleware(lineConfig), (req, res) => {
+        Promise.all(req.body.events.map(handleEvent))
+            .then((result) => res.json(result))
+            .catch((err) => {
+                console.error(err);
+                res.status(500).end();
+            });
+    });
+} else {
+    console.warn('LINE webhook is disabled; set LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET to enable it.');
+    app.post('/webhook', (req, res) => res.status(503).json({ error: 'LINE webhook is not configured' }));
+}
 
 // Event Handler
 function handleEvent(event) {
     if (event.type !== 'message' || event.message.type !== 'text') {
         return Promise.resolve(null);
     }
+    if (!lineClient) return Promise.reject(new Error('LINE client is not configured'));
 
     // Reply with User ID
     const userId = event.source.userId;
@@ -87,10 +104,11 @@ function handleEvent(event) {
 // --- Body Parser for other routes ---
 app.use(express.json());
 
-// Existing URLs use the legacy store. Future store-specific pages can send x-store-id.
+// Legacy URLs are permanently scoped to the legacy store. Multi-tenant public
+// access resolves the store from its slug, never from a caller-controlled ID.
 app.use('/api', (req, res, next) => {
     try {
-        req.storeId = normalizeStoreId(req.get('x-store-id') || DEFAULT_STORE_ID);
+        req.storeId = normalizeStoreId(DEFAULT_STORE_ID);
         next();
     } catch (error) {
         res.status(error.statusCode || 400).json({ error: 'Invalid store ID' });
@@ -111,6 +129,11 @@ app.use('/api', async (req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/merchant', merchantRoutes);
 app.use('/api/platform', platformRoutes);
+app.use('/api/store', qrRoutes);
+app.use('/api/store', teamRoutes);
+app.use('/api/store', notificationRoutes);
+app.use('/api/public/stores/:storeSlug', createPublicQueueRoutes(broadcastUpdate));
+app.use('/api/store', createStoreQueueRoutes(broadcastUpdate));
 
 async function requireActivePublicStore(req, res, next) {
     try {
@@ -127,17 +150,13 @@ async function requireActivePublicStore(req, res, next) {
 
 // Helper: Get current Session ID
 async function getCurrentSessionId(storeId) {
-    const setting = await Setting.findOne({ storeId, key: 'active_session' }).lean();
-    if (!setting || !setting.value) {
-        throw new Error('NO_ACTIVE_SESSION');
-    }
-    return setting.value;
+    return (await getActiveSession(storeId)).sessionId;
 }
 
 // Helper: Broadcast update
 async function getQueuesData(storeId) {
     const sessionId = await getCurrentSessionId(storeId);
-    const queues = await Queue.find({ storeId, sessionId, status: { $in: ['waiting', 'called', 'dining'] } }).sort({ queueNumber: 1 }).lean();
+    const queues = await Queue.find({ storeId, branchId: 'default', sessionId, status: { $in: ['waiting', 'called', 'dining'] } }).sort({ queueNumber: 1 }).lean();
     queues.forEach(queue => {
         queue.id = queue.queueNumber;
     });
@@ -195,7 +214,7 @@ app.get('/api/queues/:id', requireActivePublicStore, async (req, res) => {
             return res.status(400).json({ error: 'No active session found. Please reset the queue.' });
         }
 
-        const queue = await Queue.findOne({ storeId: req.storeId, sessionId, queueNumber: numId }).lean();
+        const queue = await Queue.findOne({ storeId: req.storeId, branchId: 'default', sessionId, queueNumber: numId }).lean();
         if (!queue) return res.status(404).json({ error: 'Queue not found' });
         queue.id = queue.queueNumber;
 
@@ -203,6 +222,7 @@ app.get('/api/queues/:id', requireActivePublicStore, async (req, res) => {
         if (queue.status === 'waiting') {
             const position = await Queue.countDocuments({
                 storeId: req.storeId,
+                branchId: 'default',
                 sessionId,
                 status: 'waiting',
                 queueNumber: { $lt: queue.queueNumber }
@@ -235,7 +255,7 @@ app.post('/api/reserve', requireActivePublicStore, async (req, res) => {
 
         // Check if Line ID already has active queue
         if (lineId) {
-            const existing = await Queue.findOne({ storeId: req.storeId, sessionId, lineUserId: lineId, status: { $in: ['waiting', 'called', 'dining'] } }).lean();
+            const existing = await Queue.findOne({ storeId: req.storeId, branchId: 'default', sessionId, lineUserId: lineId, status: { $in: ['waiting', 'called', 'dining'] } }).lean();
             if (existing) {
                 const displayId = existing.queueNumber !== undefined ? existing.queueNumber : existing._id.toString();
                 return res.status(409).json({ error: 'คุณมีคิวอยู่แล้ว (You already have a queue)', queueId: displayId });
@@ -244,7 +264,7 @@ app.post('/api/reserve', requireActivePublicStore, async (req, res) => {
 
         // Atomic queue number increment
         const counter = await Counter.findOneAndUpdate(
-            { storeId: req.storeId, sessionId },
+            { storeId: req.storeId, branchId: 'default', sessionId },
             { $inc: { seq: 1 } },
             { new: true, upsert: true }
         );
@@ -252,16 +272,22 @@ app.post('/api/reserve', requireActivePublicStore, async (req, res) => {
         const cancelToken = crypto.randomBytes(32).toString('base64url');
         const newQueue = await Queue.create({
             storeId: req.storeId,
+            branchId: 'default',
             sessionId,
             queueNumber: counter.seq,
-            customer_name: name,
+            customerName: name,
             lineUserId: lineId || null,
             cancelTokenHash: crypto.createHash('sha256').update(cancelToken).digest('hex'),
-            phone_number: phone || null,
+            phoneNumber: phone || null,
             pax: pax || 1,
             time_slot: timeSlot || null,
             status: 'waiting',
             history: [{ action: 'reserved' }]
+        });
+
+        await NotificationService.sendForQueue(newQueue, 'QUEUE_RESERVED', {
+            queueAhead: Math.max(0, counter.seq - 1),
+            estimatedWaitTime: newQueue.estimatedWaitTime
         });
 
         broadcastUpdate(req.storeId);
@@ -290,7 +316,7 @@ app.post('/api/cancel', requireActivePublicStore, async (req, res) => {
 
         if (!cancelToken) return res.status(403).json({ error: 'Cancellation token is required' });
         const cancelTokenHash = crypto.createHash('sha256').update(String(cancelToken)).digest('hex');
-        const query = { storeId: req.storeId, sessionId, queueNumber: numId, cancelTokenHash, status: { $in: ['waiting', 'called'] } };
+        const query = { storeId: req.storeId, branchId: 'default', sessionId, queueNumber: numId, cancelTokenHash, status: { $in: ['waiting', 'called'] } };
 
         const queue = await Queue.findOneAndUpdate(
             query,
@@ -304,6 +330,9 @@ app.post('/api/cancel', requireActivePublicStore, async (req, res) => {
         );
 
         if (!queue) return res.status(404).json({ error: 'Queue not found, unauthorized, or already cancelled' });
+
+        await NotificationService.sendForQueue(queue, 'QUEUE_CANCELLED');
+        await NotificationService.syncQueuePositions(req.storeId);
 
         broadcastUpdate(req.storeId);
         res.json({ success: true });
@@ -333,7 +362,7 @@ app.post('/api/admin/cancel', async (req, res) => {
     try {
         const sessionId = await getCurrentSessionId(req.storeId);
         const queue = await Queue.findOneAndUpdate(
-            { storeId: req.storeId, sessionId, queueNumber, status: { $in: ['waiting', 'called'] } },
+            { storeId: req.storeId, branchId: 'default', sessionId, queueNumber, status: { $in: ['waiting', 'called'] } },
             {
                 $set: { status: 'cancelled', cancelledAt: new Date(), manualAction: true },
                 $push: { history: { action: 'cancelled' } }
@@ -341,6 +370,8 @@ app.post('/api/admin/cancel', async (req, res) => {
             { new: true }
         );
         if (!queue) return res.status(404).json({ error: 'Queue not found or cannot be cancelled' });
+        await NotificationService.sendForQueue(queue, 'QUEUE_CANCELLED');
+        await NotificationService.syncQueuePositions(req.storeId);
         await broadcastUpdate(req.storeId);
         res.json({ success: true });
     } catch (error) {
@@ -363,7 +394,7 @@ app.post('/api/admin/call', async (req, res) => {
         }
 
         const queue = await Queue.findOneAndUpdate(
-            { storeId: req.storeId, sessionId, queueNumber: numId, status: 'waiting' },
+            { storeId: req.storeId, branchId: 'default', sessionId, queueNumber: numId, status: 'waiting' },
             {
                 status: 'called',
                 calledAt: new Date(),
@@ -374,12 +405,8 @@ app.post('/api/admin/call', async (req, res) => {
 
         if (!queue) return res.status(404).json({ error: 'Queue not found or not waiting' });
 
-        // Send LINE
-        if (queue.lineUserId) {
-            const displayId = queue.queueNumber !== undefined ? queue.queueNumber : queue._id.toString();
-            const msg = `ถึงคิวของคุณแล้ว! (คิวที่ ${displayId})\nกรุณามาที่หน้าร้านได้เลยครับ\n\nYour queue (${displayId}) is ready!`;
-            await pushMessage(queue.lineUserId, msg);
-        }
+        await NotificationService.sendForQueue(queue, 'QUEUE_CALLED');
+        await NotificationService.syncQueuePositions(req.storeId);
 
         broadcastUpdate(req.storeId);
         res.json({ success: true });
@@ -404,16 +431,19 @@ app.post('/api/admin/seat', async (req, res) => {
         }
 
         const queue = await Queue.findOneAndUpdate(
-            { storeId: req.storeId, sessionId, queueNumber: numId, status: { $in: ['waiting', 'called'] } },
+            { storeId: req.storeId, branchId: 'default', sessionId, queueNumber: numId, status: { $in: ['waiting', 'called'] } },
             {
                 status: 'dining',
-                start_time: new Date(),
+                seatedAt: new Date(),
                 $push: { history: { action: 'seated' } }
             },
             { new: true }
         );
 
         if (!queue) return res.status(404).json({ error: 'Queue not found or cannot be seated' });
+
+        await NotificationService.sendForQueue(queue, 'QUEUE_UPDATED');
+        await NotificationService.syncQueuePositions(req.storeId);
 
         broadcastUpdate(req.storeId);
         res.json({ success: true });
@@ -437,16 +467,18 @@ app.post('/api/admin/complete', async (req, res) => {
         }
 
         const queue = await Queue.findOneAndUpdate(
-            { storeId: req.storeId, sessionId, queueNumber: numId, status: 'dining' },
+            { storeId: req.storeId, branchId: 'default', sessionId, queueNumber: numId, status: 'dining' },
             {
                 status: 'completed',
-                end_time: new Date(),
+                completedAt: new Date(),
                 $push: { history: { action: 'completed' } }
             },
             { new: true }
         );
 
         if (!queue) return res.status(404).json({ error: 'Queue not found or not dining' });
+
+        await NotificationService.sendForQueue(queue, 'QUEUE_COMPLETED');
 
         broadcastUpdate(req.storeId);
         res.json({ success: true });
@@ -458,17 +490,9 @@ app.post('/api/admin/complete', async (req, res) => {
 // Admin: Reset Session
 app.post('/api/admin/reset', async (req, res) => {
     try {
-        const newSessionId = `session_${Date.now()}`;
-
-        // Ensure active_session is uniquely stored
-        await setSetting(req.storeId, 'active_session', newSessionId);
-
-        // Reset counter for that session
-        await Counter.findOneAndUpdate(
-            { storeId: req.storeId, sessionId: newSessionId },
-            { $set: { seq: 0 } },
-            { upsert: true, new: true }
-        );
+        await NotificationService.notifyStoreClosed(req.storeId);
+        const session = await resetSession(req.storeId, null);
+        const newSessionId = session.sessionId;
 
         broadcastUpdate(req.storeId);
         res.json({ success: true, sessionId: newSessionId, message: 'Queue system reset successfully for new session' });
@@ -485,10 +509,10 @@ app.get('/api/admin/stats', async (req, res) => {
         startOfToday.setHours(0, 0, 0, 0);
 
         const sessionId = await getCurrentSessionId(req.storeId);
-        const scope = { storeId: req.storeId, sessionId };
-        const total = await Queue.countDocuments({ ...scope, created_at: { $gte: startOfToday } });
-        const completed = await Queue.countDocuments({ ...scope, status: 'completed', created_at: { $gte: startOfToday } });
-        const cancelled = await Queue.countDocuments({ ...scope, status: 'cancelled', created_at: { $gte: startOfToday } });
+        const scope = { storeId: req.storeId, branchId: 'default', sessionId };
+        const total = await Queue.countDocuments({ ...scope, createdAt: { $gte: startOfToday } });
+        const completed = await Queue.countDocuments({ ...scope, status: 'completed', createdAt: { $gte: startOfToday } });
+        const cancelled = await Queue.countDocuments({ ...scope, status: 'cancelled', createdAt: { $gte: startOfToday } });
         const waiting = await Queue.countDocuments({ ...scope, status: 'waiting' });
 
         res.json({ total, completed, cancelled, waiting });
@@ -549,7 +573,13 @@ app.get(/.*/, (req, res) => {
 // Socket Connection
 io.on('connection', async (socket) => {
     try {
-        const storeId = normalizeStoreId(socket.handshake.auth?.storeId || DEFAULT_STORE_ID);
+        let storeId = DEFAULT_STORE_ID;
+        const token = socket.handshake.auth?.token;
+        if (token) {
+            const claims = verifyAccountToken(token);
+            if (!claims.storeId) throw new Error('STORE_TOKEN_REQUIRED');
+            storeId = normalizeStoreId(claims.storeId);
+        }
         socket.join(`store:${storeId}`);
         socket.data.storeId = storeId;
         socket.emit('queue_updated', await getQueuesData(storeId));

@@ -10,6 +10,8 @@ export function clearAccountSession() {
     localStorage.removeItem('account_user');
     localStorage.removeItem('account_store');
     localStorage.removeItem('dev_verification_code');
+    localStorage.removeItem('active_branch_id');
+    localStorage.removeItem('platform_account_token');
 }
 
 export function getAccountToken() {

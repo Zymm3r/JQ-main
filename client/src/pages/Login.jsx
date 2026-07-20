@@ -15,7 +15,7 @@ export default function Login() {
         try {
             const { data } = await api.post('/auth/login', form);
             saveAccountSession(data);
-            if (data.user.role === 'platform_admin') navigate('/platform/admin');
+            if (['PLATFORM_ADMIN', 'PLATFORM_SUPPORT', 'platform_admin'].includes(data.user.role)) navigate('/platform-admin');
             else if (!data.user.emailVerified) navigate('/onboarding');
             else navigate('/store/setup');
         } catch (error) {

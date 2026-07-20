@@ -252,22 +252,22 @@ export default function AdminDashboard() {
                     </h3>
                     <div className="queue-list">
                         {diningQueues.length === 0 ? <EmptyState text="No dining tables" /> : diningQueues.map(q => (
-                            <div key={q.id} className={`card queue-item-row dining ${isOverLimit(q.start_time) ? 'overtime' : ''}`}>
+                            <div key={q.id} className={`card queue-item-row dining ${isOverLimit(q.seatedAt) ? 'overtime' : ''}`}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                         <div className="q-number">{q.id}</div>
                                         <div>
-                                            <div style={{ fontWeight: 600 }}>{q.customer_name}</div>
+                                            <div style={{ fontWeight: 600 }}>{q.customerName}</div>
                                             <div style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>{q.pax} ท่าน</div>
                                         </div>
                                     </div>
                                     <div style={{ textAlign: 'right' }}>
                                         <div className="timer-badge" style={{
-                                            background: isOverLimit(q.start_time) ? '#fee2e2' : '#fef9c3',
-                                            color: isOverLimit(q.start_time) ? '#dc2626' : '#854d0e',
+                                            background: isOverLimit(q.seatedAt) ? '#fee2e2' : '#fef9c3',
+                                            color: isOverLimit(q.seatedAt) ? '#dc2626' : '#854d0e',
                                         }}>
                                             <Clock size={12} style={{ marginRight: 4 }} />
-                                            {getDiningTime(q.start_time)}
+                                            {getDiningTime(q.seatedAt)}
                                         </div>
                                     </div>
                                 </div>
@@ -293,7 +293,7 @@ export default function AdminDashboard() {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                         <div className="q-number">{q.id}</div>
                                         <div>
-                                            <div style={{ fontWeight: 600 }}>{q.customer_name}</div>
+                                            <div style={{ fontWeight: 600 }}>{q.customerName}</div>
                                             <div style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>{q.pax} ท่าน</div>
                                         </div>
                                     </div>
@@ -319,7 +319,7 @@ export default function AdminDashboard() {
                                         <div className="q-number">{q.id}</div>
                                         <div>
                                             <div style={{ fontWeight: 600 }}>
-                                                {q.customer_name}
+                                                {q.customerName}
                                                 {q.time_slot && <span style={{ marginLeft: 8, background: '#e0e7ff', color: '#4338ca', padding: '2px 6px', borderRadius: 4, fontSize: '0.75rem' }}>{q.time_slot}</span>}
                                             </div>
                                             <div style={{ fontSize: '0.8rem', color: 'var(--text-light)' }}>{q.pax} ท่าน</div>

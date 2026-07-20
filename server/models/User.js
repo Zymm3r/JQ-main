@@ -5,7 +5,12 @@ const userSchema = new mongoose.Schema({
     passwordHash: { type: String, required: true, select: false },
     name: { type: String, required: true, trim: true },
     phone: { type: String, required: true, trim: true },
-    role: { type: String, enum: ['merchant', 'platform_admin'], default: 'merchant', required: true },
+    role: {
+        type: String,
+        enum: ['STORE_OWNER', 'STORE_STAFF', 'PLATFORM_ADMIN', 'PLATFORM_SUPPORT', 'merchant', 'platform_admin'],
+        default: 'STORE_OWNER',
+        required: true
+    },
     status: { type: String, enum: ['pending_verification', 'active', 'suspended'], default: 'pending_verification', required: true },
     emailVerified: { type: Boolean, default: false },
     verificationCodeHash: { type: String, default: null, select: false },

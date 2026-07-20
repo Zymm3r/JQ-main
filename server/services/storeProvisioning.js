@@ -1,27 +1,19 @@
-const Setting = require('../models/Setting');
-const Counter = require('../models/Counter');
+const { ensureStoreSettings } = require('./storeSettingsService');
+const { createSession } = require('./queueSessionService');
+const QrSource = require('../models/QrSource');
+const { ensureLiffSlug } = require('./liffService');
+const { ensureDefaultBranch } = require('./branchService');
 
 async function ensureStoreQueueSettings(store) {
-    const sessionId = `session_${Date.now()}`;
-    const defaults = [
-        ['store_name', store.name],
-        ['table_count', '10'],
-        ['avg_time', '30'],
-        ['avg_wait_time', '15'],
-        ['active_session', sessionId]
-    ];
-
-    for (const [key, value] of defaults) {
-        await Setting.findOneAndUpdate(
-            { storeId: store.storeId, key },
-            { $setOnInsert: { storeId: store.storeId, key, value: String(value) } },
-            { upsert: true, new: true, runValidators: true }
-        );
-    }
-    const activeSession = await Setting.findOne({ storeId: store.storeId, key: 'active_session' }).lean();
-    await Counter.findOneAndUpdate(
-        { storeId: store.storeId, sessionId: activeSession.value },
-        { $setOnInsert: { seq: 0 } },
+    if (ensureLiffSlug(store) && store.isModified('liffSlug')) await store.save();
+    const branch = await ensureDefaultBranch(store);
+    await ensureStoreSettings(store.storeId, {}, branch.branchId);
+    const QueueSession = require('../models/QueueSession');
+    const activeSession = await QueueSession.findOne({ storeId: store.storeId, branchId: branch.branchId, status: 'active' });
+    if (!activeSession) await createSession(store.storeId, store.ownerId, branch.branchId);
+    await QrSource.findOneAndUpdate(
+        { storeId: store.storeId, key: 'main' },
+        { $setOnInsert: { storeId: store.storeId, key: 'main', name: 'QR หลักของร้าน', kind: 'main' } },
         { upsert: true, new: true }
     );
 }

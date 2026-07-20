@@ -15,10 +15,12 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use(config => {
-    const accountRoute = ['/auth/me', '/auth/send-verification', '/auth/verify-email', '/merchant/', '/platform/']
+    const accountRoute = ['/auth/me', '/auth/send-verification', '/auth/verify-email', '/merchant/', '/platform/', '/store/']
         .some(prefix => String(config.url || '').startsWith(prefix));
     const token = localStorage.getItem(accountRoute ? 'account_token' : 'admin_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
+    const branchId = localStorage.getItem('active_branch_id');
+    if (branchId && String(config.url || '').startsWith('/store/')) config.headers['x-branch-id'] = branchId;
     return config;
 });
 

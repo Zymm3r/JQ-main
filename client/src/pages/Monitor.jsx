@@ -32,7 +32,7 @@ export default function Monitor() {
                         {calledQueues.map(q => (
                             <div key={q.id} className="monitor-item called-flash">
                                 <div style={{ fontSize: '5rem', fontWeight: 800, color: '#365314' }}>{q.id}</div>
-                                <div style={{ fontSize: '2rem', color: '#4d7c0f' }}>{q.customer_name}</div>
+                                <div style={{ fontSize: '2rem', color: '#4d7c0f' }}>{q.customerName}</div>
                                 <div style={{ fontSize: '1.5rem', color: '#65a30d' }}>{q.pax} ท่าน</div>
                             </div>
                         ))}
@@ -56,7 +56,7 @@ export default function Monitor() {
                                     <div style={{ fontSize: '2.5rem', fontWeight: 700, width: 80 }}>{q.id}</div>
                                     <div>
                                         <div style={{ fontSize: '1.5rem', fontWeight: 600 }}>
-                                            {q.customer_name}
+                                            {q.customerName}
                                             {q.time_slot && <span className="time-tag">{q.time_slot}</span>}
                                         </div>
                                         <div style={{ fontSize: '1.2rem', color: 'var(--text-light)' }}>{q.pax} ท่าน</div>

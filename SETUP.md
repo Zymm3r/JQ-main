@@ -87,6 +87,76 @@ npm start
 
 Merchant pages are available at `/register`, `/login`, `/onboarding`, and `/store/setup`. The platform review page is `/platform/admin`.
 
+## Milestone 2 multi-tenant queue migration
+
+After deploying the Milestone 2 code, migrate the queue domain once before accepting traffic:
+
+```bash
+cd server
+npm run migrate:milestone2
+```
+
+This creates per-store queue sessions and typed store settings, backfills canonical queue fields and public tokens, and removes the obsolete `active_session` key after it has been converted. Merchant queue APIs derive `storeId` from the signed account token.
+
+## Milestone 3 LIFF and store QR codes
+
+Configure the public app URL and LIFF ID in the server environment:
+
+```env
+APP_BASE_URL=https://app.example.com
+LINE_LIFF_ID=your-liff-id
+```
+
+Set the LIFF endpoint URL in LINE Developers to `https://app.example.com/liff`, then run the one-time migration:
+
+```bash
+cd server
+npm run migrate:milestone3
+```
+
+Merchants manage printable store, branch, point, and event QR codes at `/store/qr`. Production reservations require a valid LINE access token and use the LINE profile user ID; customers do not create a separate account.
+
+## Milestone 4 central LINE notifications
+
+The central LINE OA uses `LINE_CHANNEL_ACCESS_TOKEN` for every store. After backing up MongoDB, create notification audit and monthly-usage indexes once:
+
+The LINE Login/LIFF channel and Messaging API channel must belong to the same LINE provider so their user IDs match. Enable the LIFF option that prompts customers to add the central OA as a friend; LINE cannot push notifications to customers who have blocked or cannot receive messages from the OA.
+
+```bash
+cd server
+npm run migrate:milestone4
+```
+
+LINE notifications are free and unlimited for every store and plan; no per-store monthly quota blocks delivery. Actual message counts are still recorded so merchants can inspect usage and recent delivery logs on `/store/package`, while platform administrators can monitor Central LINE OA usage and provider costs through `/api/platform/notifications/summary`.
+
+The server can start without LINE credentials; in that state `/webhook` returns `503` and `/health` reports `lineWebhook: disabled`. Set both `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_CHANNEL_SECRET` to enable webhook signature validation and LINE delivery. Set a persistent `ADMIN_TOKEN_SECRET` of at least 32 random characters in every deployed environment so account and admin sessions remain valid across restarts.
+
+## Milestone 6 staff accounts and branches
+
+Run the Milestone 6 migration after deploying the new models:
+
+```bash
+cd server
+npm run migrate:milestone6
+```
+
+The migration creates one `default` branch per existing store, adds the owner as an active `StoreMember`, backfills `branchId` into queues, sessions, counters and store settings, and replaces store-only indexes with branch-scoped indexes. Merchant queue requests use the default branch unless the client sends a validated `x-branch-id` header. The header is resolved only within the token-derived `storeId`; a branch from another store is rejected.
+
+Roles are `owner`, `manager`, `staff`, and `viewer`. Queue mutations, session reset, settings, member management, and billing use explicit permissions. Merchants manage separate staff accounts and branches at `/store/team`.
+
+## Milestone 7 platform control plane
+
+Run the role/package migration before starting the new platform backend:
+
+```bash
+cd server
+npm run migrate:milestone7
+```
+
+The dedicated control plane is `/platform-admin`. Platform identities use `PLATFORM_ADMIN` or `PLATFORM_SUPPORT`; store identities use `STORE_OWNER` or `STORE_STAFF` plus their `StoreMember` role. A platform identity cannot also be a store member. Support access to a store uses a reason-required, 30-minute impersonation token and creates an immutable platform audit record.
+
+Platform Admin can view stores, subscriptions, queue and LINE usage, delivery errors, revenue, packages and audit records; it can also review/suspend stores, change subscriptions, and set a per-store notification quota override. Stores remain free and unlimited when the override is `null`.
+
 In non-production environments, the email verification OTP is returned to the onboarding UI and logged by the server. In production, configure `EMAIL_VERIFICATION_WEBHOOK_URL` (and its optional bearer token); production neither logs nor returns OTP values in API responses.
 
 ## Deployment healthcheck

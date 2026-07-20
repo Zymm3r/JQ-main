@@ -2,6 +2,8 @@ const express = require('express');
 const Store = require('../models/Store');
 const { requireAccount, requireVerifiedAccount } = require('../services/accountAuth');
 const { refreshSubscriptionState } = require('../services/subscriptionService');
+const { ensureLiffSlug } = require('../services/liffService');
+const { requirePermission } = require('../services/memberPermissions');
 
 const router = express.Router();
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -26,6 +28,7 @@ function storeResponse(store) {
         ownerId: store.ownerId,
         name: store.name,
         slug: store.slug,
+        liffSlug: store.liffSlug,
         phone: store.phone,
         address: store.address,
         logoUrl: store.logoUrl,
@@ -54,7 +57,7 @@ router.get('/store', async (req, res) => {
     res.json(storeResponse(await refreshSubscriptionState(req.accountStore)));
 });
 
-router.put('/store', requireVerifiedAccount, async (req, res) => {
+router.put('/store', requireVerifiedAccount, requirePermission('settings.update'), async (req, res) => {
     const store = req.accountStore;
     if (!store) return res.status(404).json({ error: 'Store not found' });
     if (['pending_verification', 'suspended'].includes(store.verificationStatus)) {
@@ -77,6 +80,7 @@ router.put('/store', requireVerifiedAccount, async (req, res) => {
         const proofUrls = Array.isArray(req.body.proofUrls) ? req.body.proofUrls.slice(0, 5).map(cleanUrl) : [];
         store.name = name;
         store.slug = slug;
+        ensureLiffSlug(store);
         store.phone = phone;
         store.address = address;
         store.logoUrl = cleanUrl(req.body.logoUrl);
@@ -103,7 +107,7 @@ router.put('/store', requireVerifiedAccount, async (req, res) => {
     }
 });
 
-router.post('/store/submit', requireVerifiedAccount, async (req, res) => {
+router.post('/store/submit', requireVerifiedAccount, requirePermission('settings.update'), async (req, res) => {
     const store = req.accountStore;
     if (!store) return res.status(404).json({ error: 'Store not found' });
     if (store.verificationStatus === 'pending_verification') return res.status(409).json({ error: 'Store is already under review' });

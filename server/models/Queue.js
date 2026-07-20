@@ -16,9 +16,9 @@ const queueSchema = new mongoose.Schema({
     storeId: {
         type: String,
         required: true,
-        default: 'legacy-store',
         index: true
     },
+    branchId: { type: String, required: true, default: 'default', index: true },
     sessionId: {
         type: String,
         required: true
@@ -27,13 +27,19 @@ const queueSchema = new mongoose.Schema({
         type: Number,
         required: true
     },
+    publicToken: {
+        type: String,
+        required: true,
+        default: () => require('crypto').randomBytes(24).toString('base64url')
+    },
+    source: { type: String, default: 'main', trim: true, lowercase: true },
     status: {
         type: String,
         enum: ['waiting', 'called', 'dining', 'completed', 'cancelled'],
         default: 'waiting',
         required: true
     },
-    customer_name: {
+    customerName: {
         type: String,
         required: true
     },
@@ -44,7 +50,7 @@ const queueSchema = new mongoose.Schema({
     // Kept temporarily so the non-destructive migration can preserve legacy data.
     line_id: { type: String, default: null, select: false },
     cancelTokenHash: { type: String, default: null, select: false },
-    phone_number: {
+    phoneNumber: {
         type: String,
         default: null
     },
@@ -56,11 +62,11 @@ const queueSchema = new mongoose.Schema({
         type: String,
         default: null
     },
-    start_time: {
+    seatedAt: {
         type: Date,
         default: null
     },
-    end_time: {
+    completedAt: {
         type: Date,
         default: null
     },
@@ -76,14 +82,16 @@ const queueSchema = new mongoose.Schema({
         type: Boolean,
         default: false
     },
-    history: [historySchema]
-}, {
-    timestamps: { createdAt: 'created_at', updatedAt: 'updated_at' }
-});
+    history: [historySchema],
+    estimatedWaitTime: { type: Number, min: 0, default: 0 },
+    lastNotifiedQueueAhead: { type: Number, min: 0, default: null },
+    nearNotificationSentAt: { type: Date, default: null }
+}, { timestamps: true });
 
-queueSchema.index({ storeId: 1, sessionId: 1, status: 1, queueNumber: 1 });
-queueSchema.index({ storeId: 1, sessionId: 1, status: 1, created_at: 1, manualAction: 1 });
-queueSchema.index({ storeId: 1, sessionId: 1, queueNumber: 1 }, { unique: true });
+queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, queueNumber: 1 });
+queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, createdAt: 1, manualAction: 1 });
+queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, queueNumber: 1 }, { unique: true });
+queueSchema.index({ storeId: 1, publicToken: 1 }, { unique: true });
 
 const Queue = mongoose.model('Queue', queueSchema);
 

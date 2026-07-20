@@ -1,57 +1,62 @@
 const Queue = require('../models/Queue');
-const Setting = require('../models/Setting');
-const { getSetting } = require('./settingsService');
+const QueueSession = require('../models/QueueSession');
+const StoreSetting = require('../models/StoreSetting');
+const NotificationService = require('./notificationService');
 
 const DEFAULT_SEAT_DELAY_MINUTES = 1;
 let intervalId = null;
 
-async function runStoreAutomation(storeId, sessionId, now) {
-    const avgWaitTime = Number.parseFloat(await getSetting(storeId, 'avg_wait_time', '0')) || 0;
-    const avgTime = Number.parseFloat(await getSetting(storeId, 'avg_time', '0')) || 0;
-    const scope = { storeId, sessionId };
+async function runStoreAutomation(storeId, branchId, sessionId, now) {
+    const settings = await StoreSetting.findOne({ storeId, branchId }).lean();
+    if (!settings?.autoCallEnabled) return 0;
+    const avgWaitTime = settings.averageWaitTime || 0;
+    const avgTime = settings.averageTableTime || 0;
+    const scope = { storeId, branchId, sessionId };
     let updatedCount = 0;
 
-    if (avgWaitTime > 0) {
-        const result = await Queue.updateMany(
-            { ...scope, status: 'waiting', created_at: { $lte: new Date(now.getTime() - avgWaitTime * 60000) } },
-            {
-                $set: { status: 'called', calledAt: now },
-                $push: { history: { action: 'called', timestamp: now } }
-            }
-        );
-        updatedCount += result.modifiedCount;
+    async function transitionMany(filter, status, dateField, historyAction, notificationType) {
+        const queues = await Queue.find(filter);
+        for (const queue of queues) {
+            queue.status = status;
+            queue[dateField] = now;
+            queue.history.push({ action: historyAction, timestamp: now });
+            await queue.save();
+            await NotificationService.sendForQueue(queue, notificationType);
+        }
+        return queues.length;
     }
 
-    const seated = await Queue.updateMany(
+    if (avgWaitTime > 0) {
+        updatedCount += await transitionMany(
+            { ...scope, status: 'waiting', createdAt: { $lte: new Date(now.getTime() - avgWaitTime * 60000) } },
+            'called', 'calledAt', 'called', 'QUEUE_CALLED'
+        );
+    }
+
+    updatedCount += await transitionMany(
         { ...scope, status: 'called', calledAt: { $lte: new Date(now.getTime() - DEFAULT_SEAT_DELAY_MINUTES * 60000) } },
-        {
-            $set: { status: 'dining', start_time: now },
-            $push: { history: { action: 'seated', timestamp: now } }
-        }
+        'dining', 'seatedAt', 'seated', 'QUEUE_UPDATED'
     );
-    updatedCount += seated.modifiedCount;
 
     if (avgTime > 0) {
-        const completed = await Queue.updateMany(
-            { ...scope, status: 'dining', start_time: { $lte: new Date(now.getTime() - avgTime * 60000) } },
-            {
-                $set: { status: 'completed', end_time: now },
-                $push: { history: { action: 'completed', timestamp: now } }
-            }
+        updatedCount += await transitionMany(
+            { ...scope, status: 'dining', seatedAt: { $lte: new Date(now.getTime() - avgTime * 60000) } },
+            'completed', 'completedAt', 'completed', 'QUEUE_COMPLETED'
         );
-        updatedCount += completed.modifiedCount;
     }
+
+    if (updatedCount > 0) await NotificationService.syncQueuePositions(storeId, branchId);
 
     return updatedCount;
 }
 
 async function runAutomationLoop(onUpdateCallback) {
     try {
-        const activeSessions = await Setting.find({ key: 'active_session' }).lean();
-        for (const setting of activeSessions) {
-            const updatedCount = await runStoreAutomation(setting.storeId, setting.value, new Date());
+        const activeSessions = await QueueSession.find({ status: 'active' }).lean();
+        for (const session of activeSessions) {
+            const updatedCount = await runStoreAutomation(session.storeId, session.branchId, session.sessionId, new Date());
             if (updatedCount > 0 && typeof onUpdateCallback === 'function') {
-                await onUpdateCallback(setting.storeId);
+                await onUpdateCallback(session.storeId);
             }
         }
     } catch (error) {

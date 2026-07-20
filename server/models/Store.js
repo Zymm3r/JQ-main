@@ -5,6 +5,7 @@ const storeSchema = new mongoose.Schema({
     ownerId: { type: mongoose.Schema.Types.ObjectId, ref: 'PlatformUser', default: null, unique: true, sparse: true },
     name: { type: String, default: null, trim: true },
     slug: { type: String, default: null, trim: true, lowercase: true, unique: true, sparse: true },
+    liffSlug: { type: String, trim: true, lowercase: true },
     phone: { type: String, default: null, trim: true },
     address: { type: String, default: null, trim: true },
     logoUrl: { type: String, default: null, trim: true },
@@ -21,7 +22,8 @@ const storeSchema = new mongoose.Schema({
         default: 'expired',
         required: true
     },
-    plan: { type: String, enum: ['basic', 'pro', 'business'], default: 'basic', required: true },
+    plan: { type: String, enum: ['basic', 'starter', 'pro', 'business'], default: 'basic', required: true },
+    notificationQuotaOverride: { type: Number, min: 0, default: null },
     isActive: { type: Boolean, default: false, required: true },
     location: {
         latitude: { type: Number, default: null },
@@ -46,5 +48,6 @@ const storeSchema = new mongoose.Schema({
 
 storeSchema.index({ verificationStatus: 1, createdAt: 1 });
 storeSchema.index({ subscriptionStatus: 1, trialEndsAt: 1 });
+storeSchema.index({ liffSlug: 1 }, { unique: true, partialFilterExpression: { liffSlug: { $type: 'string' } } });
 
 module.exports = mongoose.model('Store', storeSchema);

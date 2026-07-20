@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { api } from '../api';
 import { clearAccountSession, getAccountToken } from '../utils/account';
+import MerchantNav from '../components/MerchantNav';
 
 const emptyStore = {
     name: '', slug: '', phone: '', address: '', logoUrl: '', description: '',
@@ -24,6 +25,7 @@ export default function StoreSetup() {
             latitude: data.location?.latitude ?? '',
             longitude: data.location?.longitude ?? '',
             googleMapsUrl: data.location?.googleMapsUrl || '',
+            description: data.description || '',
             proofUrls: data.proofUrls?.length ? data.proofUrls : [''],
             acceptedTerms: data.termsAccepted
         });
@@ -68,10 +70,10 @@ export default function StoreSetup() {
         }
     };
 
-    if (!status) return <div className="card">Loading...</div>;
+    if (!status) return <><MerchantNav /><div className="card">Loading...</div></>;
     const locked = ['pending_verification', 'suspended'].includes(status.verificationStatus);
 
-    return (
+    return (<><MerchantNav />
         <div className="card" style={{ maxWidth: 760, margin: '20px auto', textAlign: 'left' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 15, alignItems: 'flex-start' }}>
                 <div><h2>ข้อมูลร้านค้า</h2><p style={{ color: 'var(--text-light)', marginTop: 6 }}>Store ID: <code>{status.storeId}</code></p></div>
@@ -104,7 +106,7 @@ export default function StoreSetup() {
                     <button type="button" className="btn btn-primary" style={{ marginTop: 10 }} disabled={saving} onClick={submitReview}>ส่งตรวจสอบและเริ่ม Trial</button>
                 </form>
             )}
-        </div>
+        </div></>
     );
 }
 

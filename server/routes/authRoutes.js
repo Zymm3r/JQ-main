@@ -2,10 +2,13 @@ const express = require('express');
 const crypto = require('crypto');
 const User = require('../models/User');
 const Store = require('../models/Store');
+const StoreMember = require('../models/StoreMember');
 const { hashPin: hashPassword, verifyPin: verifyPassword } = require('../services/adminAuth');
 const { signAccountToken, requireAccount } = require('../services/accountAuth');
 const { issueVerificationCode, isVerificationCodeValid } = require('../services/verificationService');
 const { createRateLimiter } = require('../services/rateLimit');
+const { effectivePermissions } = require('../services/memberPermissions');
+const { isStoreRole } = require('../services/platformPermissions');
 
 const router = express.Router();
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -30,7 +33,7 @@ function publicUser(user) {
     };
 }
 
-function publicStore(store) {
+function publicStore(store, membership = null) {
     if (!store) return null;
     return {
         storeId: store.storeId,
@@ -39,7 +42,8 @@ function publicStore(store) {
         verificationStatus: store.verificationStatus,
         subscriptionStatus: store.subscriptionStatus,
         plan: store.plan,
-        isActive: store.isActive
+        isActive: store.isActive,
+        membership: membership ? { role: membership.role, permissions: effectivePermissions(membership), status: membership.status } : null
     };
 }
 
@@ -58,13 +62,15 @@ router.post('/register', registrationLimit, async (req, res) => {
 
     let user;
     let store;
+    let membership;
     try {
         user = await User.create({
             email,
             passwordHash: await hashPassword(password),
             name,
             phone,
-            acceptedTermsAt: new Date()
+            acceptedTermsAt: new Date(),
+            role: 'STORE_OWNER'
         });
         store = await Store.create({
             storeId: `store-${crypto.randomUUID()}`,
@@ -75,14 +81,16 @@ router.post('/register', registrationLimit, async (req, res) => {
             plan: 'basic',
             isActive: false
         });
+        membership = await StoreMember.create({ storeId: store.storeId, userId: user._id, role: 'owner', status: 'active' });
         const code = await issueVerificationCode(await User.findById(user._id).select('+verificationCodeHash +verificationExpiresAt +verificationSentAt'));
         res.status(201).json({
-            token: signAccountToken(user),
+            token: signAccountToken(user, store),
             user: publicUser(user),
-            store: publicStore(store),
+            store: publicStore(store, membership),
             ...(process.env.NODE_ENV !== 'production' ? { devVerificationCode: code } : {})
         });
     } catch (error) {
+        if (membership?._id) await StoreMember.deleteOne({ _id: membership._id }).catch(() => {});
         if (store?._id) await Store.deleteOne({ _id: store._id }).catch(() => {});
         if (user?._id) await User.deleteOne({ _id: user._id }).catch(() => {});
         if (error.code === 11000) return res.status(409).json({ error: 'Email is already registered' });
@@ -99,15 +107,27 @@ router.post('/login', loginLimit, async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
         if (user.status === 'suspended') return res.status(403).json({ error: 'Account is suspended' });
-        const store = await Store.findOne({ ownerId: user._id });
-        res.json({ token: signAccountToken(user), user: publicUser(user), store: publicStore(store) });
+        let store = await Store.findOne({ ownerId: user._id });
+        let membership = store ? await StoreMember.findOne({ storeId: store.storeId, userId: user._id, status: 'active' }) : null;
+        if (!store) {
+            membership = await StoreMember.findOne({ userId: user._id, status: 'active' });
+            store = membership ? await Store.findOne({ storeId: membership.storeId }) : null;
+        }
+        if (isStoreRole(user.role) && (!store || (!membership && !store.ownerId?.equals(user._id)))) {
+            return res.status(403).json({ error: 'No active store membership' });
+        }
+        const effectiveMembership = membership || (store ? { role: 'owner', permissions: [], status: 'active' } : null);
+        res.json({ token: signAccountToken(user, store), user: publicUser(user), store: publicStore(store, effectiveMembership) });
     } catch (error) {
         res.status(500).json({ error: 'Login failed' });
     }
 });
 
 router.get('/me', requireAccount, (req, res) => {
-    res.json({ user: publicUser(req.account), store: publicStore(req.accountStore) });
+    res.json({
+        user: publicUser(req.account),
+        store: publicStore(req.accountStore, req.auth.memberRole ? { role: req.auth.memberRole, permissions: req.auth.permissions, status: 'active' } : null)
+    });
 });
 
 router.post('/send-verification', verificationLimit, requireAccount, async (req, res) => {
