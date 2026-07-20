@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const Queue = require('../models/Queue');
 const Counter = require('../models/Counter');
 const Setting = require('../models/Setting');
-const User = require('../models/User');
+const LineUser = require('../models/LineUser');
 const { DEFAULT_STORE_ID, normalizeStoreId } = require('../config');
 const { hashPin, verifyPin, signToken, verifyToken } = require('../services/adminAuth');
 
@@ -24,7 +24,7 @@ test('queue, counter and setting uniqueness is tenant scoped', () => {
     assert.ok(hasUniqueIndex(Queue, { storeId: 1, sessionId: 1, queueNumber: 1 }));
     assert.ok(hasUniqueIndex(Counter, { storeId: 1, sessionId: 1 }));
     assert.ok(hasUniqueIndex(Setting, { storeId: 1, key: 1 }));
-    assert.ok(hasUniqueIndex(User, { storeId: 1, lineUserId: 1 }));
+    assert.ok(hasUniqueIndex(LineUser, { storeId: 1, lineUserId: 1 }));
 });
 
 test('queue schema uses lineUserId and retains the legacy field for migration safety', () => {

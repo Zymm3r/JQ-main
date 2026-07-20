@@ -58,7 +58,16 @@ async function migrate(mongoUri = process.env.MONGO_URI) {
 
     await stores.updateOne(
         { storeId },
-        { $setOnInsert: { storeId, status: 'active', createdAt: new Date(), updatedAt: new Date() } },
+        {
+            $setOnInsert: { storeId, name: process.env.LEGACY_STORE_NAME || 'Shabu Q', createdAt: new Date() },
+            $set: {
+                verificationStatus: 'verified',
+                subscriptionStatus: 'active',
+                plan: 'basic',
+                isActive: true,
+                updatedAt: new Date()
+            }
+        },
         { upsert: true }
     );
 

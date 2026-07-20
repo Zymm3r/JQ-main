@@ -74,3 +74,30 @@ npm run migrate:multi-tenant
 ```
 
 The migration assigns existing queues, users, counters, and settings to `legacy-store`, copies `line_id` into `lineUserId`, preserves the old field, and replaces global unique indexes with store-scoped indexes. It does not delete application data.
+
+## Milestone 1 membership setup
+
+Add `PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` to `server/.env` to seed the first platform reviewer. Then run:
+
+```bash
+cd server
+npm run migrate:membership
+npm start
+```
+
+Merchant pages are available at `/register`, `/login`, `/onboarding`, and `/store/setup`. The platform review page is `/platform/admin`.
+
+In non-production environments, the email verification OTP is returned to the onboarding UI and logged by the server. In production, configure `EMAIL_VERIFICATION_WEBHOOK_URL` (and its optional bearer token); production neither logs nor returns OTP values in API responses.
+
+## Deployment healthcheck
+
+From the repository root, use:
+
+```bash
+npm run build
+npm start
+```
+
+Configure the deployment platform's healthcheck path as `/ping`. This liveness endpoint returns `200` as soon as the HTTP server is listening and does not wait for MongoDB. `/health` is a separate readiness endpoint and returns `503` until MongoDB is connected.
+
+Set all production environment variables on the deployment platform. If the MongoDB Atlas password contains a reserved URI character such as `@`, percent-encode that character in `MONGO_URI` (for example, `@` becomes `%40`).

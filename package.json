@@ -1,9 +1,11 @@
 {
   "name": "nodal-gravity",
   "version": "1.0.0",
-  "main": "index.js",
+  "main": "server/index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node server/index.js",
+    "build": "npm --prefix client run build",
+    "postinstall": "npm --prefix server ci --include=dev && npm --prefix client ci --include=dev"
   },
   "keywords": [],
   "author": "",

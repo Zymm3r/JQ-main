@@ -1,4 +1,5 @@
 const Store = require('./models/Store');
+const User = require('./models/User');
 const Setting = require('./models/Setting');
 const { DEFAULT_STORE_ID } = require('./config');
 const { hashPin } = require('./services/adminAuth');
@@ -7,7 +8,15 @@ async function initDb() {
     const storeId = DEFAULT_STORE_ID;
     await Store.findOneAndUpdate(
         { storeId },
-        { $setOnInsert: { storeId, status: 'active' } },
+        {
+            $setOnInsert: { storeId, name: process.env.LEGACY_STORE_NAME || 'Shabu Q' },
+            $set: {
+                verificationStatus: 'verified',
+                subscriptionStatus: 'active',
+                plan: 'basic',
+                isActive: true
+            }
+        },
         { upsert: true, new: true, runValidators: true }
     );
 
@@ -32,6 +41,24 @@ async function initDb() {
         await Setting.create({ storeId, key: 'admin_pin_hash', value: await hashPin(process.env.LEGACY_ADMIN_PIN) });
     } else if (!pinSetting) {
         console.warn('LEGACY_ADMIN_PIN is not set; admin login is disabled until an admin PIN hash is configured.');
+    }
+
+    if (process.env.PLATFORM_ADMIN_EMAIL && process.env.PLATFORM_ADMIN_PASSWORD) {
+        const email = process.env.PLATFORM_ADMIN_EMAIL.trim().toLowerCase();
+        const admin = await User.findOne({ email });
+        if (!admin) {
+            await User.create({
+                email,
+                passwordHash: await hashPin(process.env.PLATFORM_ADMIN_PASSWORD),
+                name: process.env.PLATFORM_ADMIN_NAME || 'Platform Admin',
+                phone: process.env.PLATFORM_ADMIN_PHONE || '-',
+                role: 'platform_admin',
+                status: 'active',
+                emailVerified: true,
+                acceptedTermsAt: new Date()
+            });
+            console.log('Platform administrator account created from environment configuration.');
+        }
     }
 
     console.log(`Database defaults are ready for store ${storeId}.`);

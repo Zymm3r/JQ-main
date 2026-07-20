@@ -15,7 +15,9 @@ export const api = axios.create({
 });
 
 api.interceptors.request.use(config => {
-    const token = localStorage.getItem('admin_token');
+    const accountRoute = ['/auth/me', '/auth/send-verification', '/auth/verify-email', '/merchant/', '/platform/']
+        .some(prefix => String(config.url || '').startsWith(prefix));
+    const token = localStorage.getItem(accountRoute ? 'account_token' : 'admin_token');
     if (token) config.headers.Authorization = `Bearer ${token}`;
     return config;
 });

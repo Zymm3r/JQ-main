@@ -5,6 +5,7 @@
     "scripts": {
         "start": "node index.js",
         "migrate:multi-tenant": "node migrate_multi_tenant.js",
+        "migrate:membership": "node migrate_membership.js",
         "test": "node --test"
     },
     "keywords": [],

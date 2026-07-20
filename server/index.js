@@ -15,19 +15,19 @@ const { initDb } = require('./database');
 const { DEFAULT_STORE_ID, normalizeStoreId } = require('./config');
 const { getSetting, setSetting } = require('./services/settingsService');
 const { loginAdmin, requireAdmin } = require('./services/adminAuth');
+const authRoutes = require('./routes/authRoutes');
+const merchantRoutes = require('./routes/merchantRoutes');
+const platformRoutes = require('./routes/platformRoutes');
+const { refreshSubscriptionState, subscriptionAllowsQueue } = require('./services/subscriptionService');
 
 const { pushMessage, client: lineClient } = require('./lineService');
 const line = require('@line/bot-sdk');
 
-mongoose.connect(process.env.MONGO_URI)
-    .then(async () => {
-        console.log('Mongoose connected successfully.');
-        await initDb();
-    })
-    .catch((err) => console.error('Mongoose connection error:', err));
-
 const app = express();
 const server = http.createServer(app);
+let databaseReady = mongoose.connection.readyState === 1;
+let databaseConnectionPromise = null;
+let automationStarted = false;
 const io = new Server(server, {
     cors: {
         origin: "*", // Allow all for dev
@@ -36,6 +36,21 @@ const io = new Server(server, {
 });
 
 app.use(cors());
+
+// Liveness must not depend on an external database. Deployment platforms use
+// this endpoint to confirm that the Node process has opened its HTTP port.
+app.get('/ping', (req, res) => {
+    res.status(200).send('Server is awake');
+});
+
+// Readiness is intentionally separate so operators can detect database issues
+// without causing the deployment healthcheck itself to time out.
+app.get('/health', (req, res) => {
+    res.status(databaseReady ? 200 : 503).json({
+        status: databaseReady ? 'ready' : 'starting',
+        database: databaseReady ? 'connected' : 'disconnected'
+    });
+});
 
 // --- LINE Webhook Config ---
 const lineConfig = {
@@ -82,6 +97,34 @@ app.use('/api', (req, res, next) => {
     }
 });
 
+// Avoid Mongoose buffering requests indefinitely while Atlas is unavailable.
+// A cold serverless invocation may wait briefly for the shared connection.
+app.use('/api', async (req, res, next) => {
+    try {
+        await ensureDatabase();
+        next();
+    } catch (error) {
+        res.status(503).json({ error: 'Database is temporarily unavailable' });
+    }
+});
+
+app.use('/api/auth', authRoutes);
+app.use('/api/merchant', merchantRoutes);
+app.use('/api/platform', platformRoutes);
+
+async function requireActivePublicStore(req, res, next) {
+    try {
+        const store = await refreshSubscriptionState(await Store.findOne({ storeId: req.storeId }));
+        if (!store || store.verificationStatus !== 'verified' || !store.isActive || !subscriptionAllowsQueue(store)) {
+            return res.status(403).json({ error: 'Store queue is not active' });
+        }
+        req.publicStore = store.toObject();
+        next();
+    } catch (error) {
+        res.status(500).json({ error: 'Unable to validate store' });
+    }
+}
+
 // Helper: Get current Session ID
 async function getCurrentSessionId(storeId) {
     const setting = await Setting.findOne({ storeId, key: 'active_session' }).lean();
@@ -126,19 +169,12 @@ async function broadcastUpdate(storeId = DEFAULT_STORE_ID) {
 
 // --- API Routes ---
 
-// Keep-Alive Ping for Render / cron-job.org
-app.get('/ping', (req, res) => {
-    res.status(200).send('Server is awake');
-});
-
-app.get('/api/store', async (req, res) => {
-    const store = await Store.findOne({ storeId: req.storeId, status: 'active' }).lean();
-    if (!store) return res.status(404).json({ error: 'Store not found' });
-    res.json({ storeId: req.storeId, name: await getSetting(req.storeId, 'store_name', 'Store') });
+app.get('/api/store', requireActivePublicStore, async (req, res) => {
+    res.json({ storeId: req.storeId, name: req.publicStore.name || await getSetting(req.storeId, 'store_name', 'Store') });
 });
 
 // Get active queues
-app.get('/api/queues', async (req, res) => {
+app.get('/api/queues', requireActivePublicStore, async (req, res) => {
     try {
         res.json(await getQueuesData(req.storeId));
     } catch (e) {
@@ -147,7 +183,7 @@ app.get('/api/queues', async (req, res) => {
 });
 
 // Get single queue status
-app.get('/api/queues/:id', async (req, res) => {
+app.get('/api/queues/:id', requireActivePublicStore, async (req, res) => {
     try {
         const numId = Number(req.params.id);
         if (!Number.isSafeInteger(numId) || numId < 1) return res.status(400).json({ error: 'Invalid queue number' });
@@ -185,7 +221,7 @@ app.get('/api/queues/:id', async (req, res) => {
 });
 
 // Reserve Queue (New Dynamic)
-app.post('/api/reserve', async (req, res) => {
+app.post('/api/reserve', requireActivePublicStore, async (req, res) => {
     const { name, lineId, pax, phone, timeSlot } = req.body;
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
@@ -239,7 +275,7 @@ app.post('/api/reserve', async (req, res) => {
 });
 
 // Cancel Queue (Customer)
-app.post('/api/cancel', async (req, res) => {
+app.post('/api/cancel', requireActivePublicStore, async (req, res) => {
     try {
         const { id, cancelToken } = req.body;
         const numId = Number(id);
@@ -525,8 +561,71 @@ io.on('connection', async (socket) => {
 
 const { startAutomation } = require('./services/queueAutomation');
 
-const PORT = 3000;
-server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-    startAutomation(broadcastUpdate);
+function startAutomationOnce() {
+    if (!automationStarted && databaseReady && server.listening) {
+        automationStarted = true;
+        startAutomation(broadcastUpdate);
+    }
+}
+
+async function connectDatabase() {
+    if (!process.env.MONGO_URI) throw new Error('MONGO_URI is required');
+    if (mongoose.connection.readyState === 1) {
+        databaseReady = true;
+        return;
+    }
+
+    await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 10000 });
+    await initDb();
+    databaseReady = true;
+    startAutomationOnce();
+}
+
+function ensureDatabase() {
+    if (databaseReady && mongoose.connection.readyState === 1) return Promise.resolve();
+    if (!databaseConnectionPromise) {
+        databaseConnectionPromise = connectDatabase()
+            .catch(error => {
+                databaseReady = false;
+                throw error;
+            })
+            .finally(() => {
+                databaseConnectionPromise = null;
+            });
+    }
+    return databaseConnectionPromise;
+}
+
+mongoose.connection.on('disconnected', () => {
+    databaseReady = false;
 });
+
+function start() {
+    const port = Number(process.env.PORT) || 3000;
+    if (server.listening) return server;
+
+    server.listen(port, () => {
+        console.log(`Server running on port ${port}`);
+        startAutomationOnce();
+    });
+    ensureDatabase().catch(() => {
+        console.error('Initial database connection failed; API requests will retry.');
+    });
+    return server;
+}
+
+if (require.main === module) {
+    start();
+} else {
+    // Serverless runtimes import the Express app instead of calling start().
+    ensureDatabase().catch(() => {
+        console.error('Initial database connection failed; API requests will retry.');
+    });
+}
+
+// Export the Express handler for Vercel while retaining helpers for local tests.
+module.exports = app;
+module.exports.app = app;
+module.exports.server = server;
+module.exports.start = start;
+module.exports.ensureDatabase = ensureDatabase;
