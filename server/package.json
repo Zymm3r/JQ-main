@@ -1,0 +1,25 @@
+{
+    "name": "server",
+    "version": "1.0.0",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "migrate:multi-tenant": "node migrate_multi_tenant.js",
+        "test": "node --test"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "description": "",
+    "dependencies": {
+        "@line/bot-sdk": "^10.5.0",
+        "cors": "^2.8.5",
+        "dotenv": "^17.2.3",
+        "express": "^4.21.2",
+        "mongoose": "^8.1.0",
+        "socket.io": "^4.8.3"
+    },
+    "devDependencies": {
+        "mongodb-memory-server": "^11.2.0"
+    }
+}
