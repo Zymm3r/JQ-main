@@ -1,7 +1,7 @@
 const express = require('express');
 const Store = require('../models/Store');
 const Queue = require('../models/Queue');
-const { refreshSubscriptionState, subscriptionAllowsQueue } = require('../services/subscriptionService');
+const { refreshSubscriptionState } = require('../services/subscriptionService');
 const { publicQueue, reserve } = require('../services/queueService');
 const StoreSetting = require('../models/StoreSetting');
 const QrSource = require('../models/QrSource');
@@ -9,6 +9,13 @@ const { normalizeSource } = require('../services/liffService');
 const { resolveLineIdentity } = require('../services/lineLiffAuth');
 const NotificationService = require('../services/notificationService');
 const { resolveBranch } = require('../services/branchService');
+const { createRateLimiter } = require('../services/rateLimit');
+
+const reserveLimit = createRateLimiter({
+    windowMs: 60 * 1000,
+    max: 20,
+    key: req => `${req.ip}:${req.params.storeSlug}:${req.body?.source || req.query?.source || 'main'}`
+});
 
 function createPublicQueueRoutes(onUpdate = null) {
     const router = express.Router({ mergeParams: true });
@@ -54,8 +61,8 @@ function createPublicQueueRoutes(onUpdate = null) {
         });
     });
 
-    router.post('/reserve', async (req, res) => {
-        if (req.publicStore.verificationStatus !== 'verified' || !req.publicStore.isActive || !subscriptionAllowsQueue(req.publicStore)) {
+    router.post('/reserve', reserveLimit, async (req, res) => {
+        if (req.publicStore.verificationStatus !== 'verified' || !req.publicStore.isActive) {
             return res.status(403).json({ error: 'Store queue is not active' });
         }
         const customerName = String(req.body.customerName || req.body.name || '').trim();
@@ -75,16 +82,19 @@ function createPublicQueueRoutes(onUpdate = null) {
                 phoneNumber,
                 lineUserId: identity.lineUserId,
                 pax,
-                source
+                source,
+                idempotencyKey: String(req.get('idempotency-key') || req.body.idempotencyKey || '').trim().slice(0, 160)
             }, req.publicBranch.branchId);
-            await NotificationService.sendForQueue(queue, 'QUEUE_RESERVED', {
-                queueAhead: queue.lastNotifiedQueueAhead,
-                estimatedWaitTime: queue.estimatedWaitTime
-            });
-            if (sourceRecord) await QrSource.updateOne({ _id: sourceRecord._id }, { $inc: { reservationCount: 1 } });
-            if (onUpdate) await onUpdate(req.publicStore.storeId);
+            if (!queue.$wasIdempotentReplay) {
+                await NotificationService.sendForQueue(queue, 'QUEUE_RESERVED', {
+                    queueAhead: queue.lastNotifiedQueueAhead,
+                    estimatedWaitTime: queue.estimatedWaitTime
+                });
+                if (sourceRecord) await QrSource.updateOne({ _id: sourceRecord._id }, { $inc: { reservationCount: 1 } });
+                if (onUpdate) await onUpdate(req.publicStore.storeId);
+            }
             const appBaseUrl = String(process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/$/, '');
-            res.status(201).json({
+            res.status(queue.$wasIdempotentReplay ? 200 : 201).json({
                 ...publicQueue(queue),
                 trackingUrl: `${appBaseUrl}/liff/${encodeURIComponent(req.publicStore.liffSlug)}/status/${encodeURIComponent(queue.publicToken)}`
             });

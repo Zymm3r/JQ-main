@@ -19,7 +19,7 @@ const createPublicQueueRoutes = require('../routes/publicQueueRoutes');
 async function request(baseUrl, path, options = {}) {
     const response = await fetch(`${baseUrl}${path}`, {
         method: options.method || 'GET',
-        headers: { 'content-type': 'application/json', ...(options.token ? { authorization: `Bearer ${options.token}` } : {}) },
+        headers: { 'content-type': 'application/json', ...(options.token ? { authorization: `Bearer ${options.token}` } : {}), ...(options.headers || {}) },
         body: options.body ? JSON.stringify(options.body) : undefined
     });
     return { status: response.status, data: await response.json() };
@@ -64,6 +64,21 @@ test('Milestone 3 creates tenant QR sources and records LIFF reservation source'
         assert.match(reservation.data.trackingUrl, /\/liff\/store-alpha-a93k\/status\//);
         assert.equal((await Queue.findById(reservation.data.id)).source, 'front-desk');
         assert.equal((await QrSource.findById(source.data.id)).reservationCount, 1);
+
+        const idempotentOne = await request(baseUrl, '/api/public/stores/store-alpha-a93k/reserve', {
+            method: 'POST',
+            headers: { 'idempotency-key': 'same-phone-refresh' },
+            body: { customerName: 'Refresh Customer', pax: 2, phoneNumber: '0811111111', source: 'front-desk' }
+        });
+        const idempotentTwo = await request(baseUrl, '/api/public/stores/store-alpha-a93k/reserve', {
+            method: 'POST',
+            headers: { 'idempotency-key': 'same-phone-refresh' },
+            body: { customerName: 'Refresh Customer', pax: 2, phoneNumber: '0811111111', source: 'front-desk' }
+        });
+        assert.equal(idempotentOne.status, 201);
+        assert.equal(idempotentTwo.status, 200);
+        assert.equal(idempotentTwo.data.id, idempotentOne.data.id);
+        assert.equal((await Queue.countDocuments({ storeId: alpha.store.storeId, customerName: 'Refresh Customer' })), 1);
 
         const previousNodeEnv = process.env.NODE_ENV;
         const previousLiffId = process.env.LINE_LIFF_ID;

@@ -61,16 +61,19 @@ test('Milestone 7 provides a separated, audited platform control plane', { timeo
 
         const packageUpdate = await request(baseUrl, '/api/platform/packages/pro', { method: 'PUT', token: adminToken, body: { name: 'Pro', monthlyPrice: 999, features: ['multi-branch'], reason: 'Set launch price' } });
         assert.equal(packageUpdate.status, 200);
-        assert.equal((await request(baseUrl, '/api/platform/revenue', { token: adminToken })).data.monthlyRecurringRevenue, 999);
+        const revenue = await request(baseUrl, '/api/platform/revenue', { token: adminToken });
+        assert.equal(revenue.data.monthlyRecurringRevenue, 0);
+        assert.equal(revenue.data.byPackage[0].code, 'free');
 
         const quota = await request(baseUrl, `/api/platform/stores/${store.storeId}/quota`, { method: 'PUT', token: adminToken, body: { limit: 1, reason: 'Temporary abuse control' } });
         assert.equal(quota.status, 200);
-        assert.equal(quota.data.limit, 1);
+        assert.equal(quota.data.limit, null);
+        assert.equal(quota.data.unlimited, true);
         assert.equal((await NotificationService.send({ storeId: store.storeId, lineUserId: 'LINE-1', type: 'QUEUE_UPDATED' })).status, 'sent');
-        assert.equal((await NotificationService.send({ storeId: store.storeId, lineUserId: 'LINE-1', type: 'QUEUE_UPDATED' })).status, 'quota_exceeded');
+        assert.equal((await NotificationService.send({ storeId: store.storeId, lineUserId: 'LINE-1', type: 'QUEUE_UPDATED' })).status, 'sent');
         const errors = await request(baseUrl, '/api/platform/errors', { token: adminToken });
         assert.equal(errors.status, 200);
-        assert.ok(errors.data.some(item => item.errorCode === 'STORE_QUOTA_EXCEEDED'));
+        assert.ok(errors.data.every(item => item.errorCode !== 'STORE_QUOTA_EXCEEDED'));
         assert.ok(errors.data.every(item => item.lineUserId === undefined));
 
         assert.equal((await request(baseUrl, `/api/platform/stores/${store.storeId}/impersonate`, { method: 'POST', token: supportToken, body: { reason: 'short' } })).status, 400);
@@ -79,7 +82,7 @@ test('Milestone 7 provides a separated, audited platform control plane', { timeo
         assert.equal((await request(baseUrl, '/api/store/queues', { token: impersonation.data.token })).status, 200);
         assert.equal((await request(baseUrl, '/api/store/queues', { token: supportToken })).status, 403);
         assert.ok(await PlatformAudit.exists({ action: 'store.impersonate', storeId: store.storeId, actorUserId: support._id }));
-        assert.ok(await PlatformAudit.exists({ action: 'quota.update', storeId: store.storeId, actorUserId: admin._id }));
+        assert.ok(await PlatformAudit.exists({ action: 'quota.disabled', storeId: store.storeId, actorUserId: admin._id }));
     } finally {
         NotificationService.resetTransportForTests();
         await new Promise(resolve => server.close(resolve));

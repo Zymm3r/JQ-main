@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Queue = require('../models/Queue');
 const { requireAccount, requireVerifiedAccount } = require('../services/accountAuth');
-const { refreshSubscriptionState, subscriptionAllowsQueue } = require('../services/subscriptionService');
+const { refreshSubscriptionState } = require('../services/subscriptionService');
 const { listActiveQueues } = require('../services/queueService');
 const { resetSession } = require('../services/queueSessionService');
 const NotificationService = require('../services/notificationService');
@@ -16,7 +16,7 @@ function createStoreQueueRoutes(onUpdate = null) {
     router.use(requireAccount, requireVerifiedAccount);
     router.use(async (req, res, next) => {
         const store = await refreshSubscriptionState(req.accountStore);
-        if (!req.auth.storeId || !store || store.verificationStatus !== 'verified' || !store.isActive || !subscriptionAllowsQueue(store)) {
+        if (!req.auth.storeId || !store || store.verificationStatus !== 'verified' || !store.isActive) {
             return res.status(403).json({ error: 'Active merchant store required' });
         }
         next();

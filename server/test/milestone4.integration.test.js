@@ -111,7 +111,7 @@ test('Milestone 4 central notifications provide Flex messages, lifecycle logs, r
 
         const usageApi = await request(baseUrl, '/api/store/notifications/usage', { token: merchantToken });
         assert.equal(usageApi.status, 200);
-        assert.equal(usageApi.data.plan, 'trial');
+        assert.equal(usageApi.data.plan, 'business');
         assert.equal(usageApi.data.limit, null);
         assert.equal(usageApi.data.unlimited, true);
         assert.equal(usageApi.data.remaining, null);

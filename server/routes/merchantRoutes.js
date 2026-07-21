@@ -127,12 +127,13 @@ router.post('/store/submit', requireVerifiedAccount, requirePermission('settings
 
     const now = new Date();
     store.verificationStatus = 'pending_verification';
-    store.subscriptionStatus = 'trial';
+    store.subscriptionStatus = 'active';
     store.plan = store.plan || 'basic';
     store.isActive = false;
     store.submittedAt = now;
-    store.trialStartedAt = now;
-    store.trialEndsAt = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+    store.trialStartedAt = null;
+    store.trialEndsAt = null;
+    store.subscriptionEndsAt = null;
     store.rejectionReason = null;
     store.informationRequest = null;
     await store.save();

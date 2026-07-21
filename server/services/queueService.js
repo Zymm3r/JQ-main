@@ -59,6 +59,14 @@ async function reserve(storeId, input, branchId = 'default') {
             throw error;
         }
     }
+    const idempotencyKey = String(input.idempotencyKey || '').trim() || null;
+    if (idempotencyKey) {
+        const duplicate = await Queue.findOne({ storeId, branchId, sessionId: session.sessionId, idempotencyKey });
+        if (duplicate) {
+            duplicate.$wasIdempotentReplay = true;
+            return duplicate;
+        }
+    }
 
     const counter = await Counter.findOneAndUpdate(
         { storeId, branchId, sessionId: session.sessionId },
@@ -66,23 +74,35 @@ async function reserve(storeId, input, branchId = 'default') {
         { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     const estimatedWaitTime = Math.ceil(((activeCount + 1) / settings.totalTables) * settings.averageTableTime);
-    return Queue.create({
-        storeId,
-        branchId,
-        sessionId: session.sessionId,
-        queueNumber: counter.seq,
-        publicToken: crypto.randomBytes(24).toString('base64url'),
-        source: input.source || 'main',
-        customerName: input.customerName,
-        lineUserId: input.lineUserId || null,
-        phoneNumber: input.phoneNumber || null,
-        pax: input.pax,
-        status: 'waiting',
-        estimatedWaitTime,
-        lastNotifiedQueueAhead: activeCount,
-        nearNotificationSentAt: activeCount <= 2 ? new Date() : null,
-        history: [{ action: 'reserved' }]
-    });
+    try {
+        return await Queue.create({
+            storeId,
+            branchId,
+            sessionId: session.sessionId,
+            queueNumber: counter.seq,
+            publicToken: crypto.randomBytes(24).toString('base64url'),
+            source: input.source || 'main',
+            idempotencyKey,
+            customerName: input.customerName,
+            lineUserId: input.lineUserId || null,
+            phoneNumber: input.phoneNumber || null,
+            pax: input.pax,
+            status: 'waiting',
+            estimatedWaitTime,
+            lastNotifiedQueueAhead: activeCount,
+            nearNotificationSentAt: activeCount <= 2 ? new Date() : null,
+            history: [{ action: 'reserved' }]
+        });
+    } catch (error) {
+        if (error.code === 11000 && idempotencyKey) {
+            const duplicate = await Queue.findOne({ storeId, branchId, sessionId: session.sessionId, idempotencyKey });
+            if (duplicate) {
+                duplicate.$wasIdempotentReplay = true;
+                return duplicate;
+            }
+        }
+        throw error;
+    }
 }
 
 module.exports = { ACTIVE_STATUSES, publicQueue, listActiveQueues, reserve };

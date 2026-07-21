@@ -70,7 +70,7 @@ test('merchant registration, verification, store submission and approval work en
         });
         assert.equal(submission.status, 200);
         assert.equal(submission.data.verificationStatus, 'pending_verification');
-        assert.equal(submission.data.subscriptionStatus, 'trial');
+        assert.equal(submission.data.subscriptionStatus, 'active');
         assert.equal(submission.data.isActive, false);
 
         const admin = await User.create({
@@ -98,7 +98,7 @@ test('merchant registration, verification, store submission and approval work en
 
         const stored = await Store.findOne({ storeId: registration.data.store.storeId }).lean();
         assert.equal(stored.ownerId.toString(), registration.data.user.id);
-        assert.equal(stored.subscriptionStatus, 'trial');
+        assert.equal(stored.subscriptionStatus, 'active');
     } finally {
         await new Promise(resolve => server.close(resolve));
         await mongoose.disconnect();

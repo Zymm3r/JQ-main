@@ -31,9 +31,8 @@ function periodFor(date = new Date()) {
 }
 
 function quotaForStore(store) {
-    const plan = store.subscriptionStatus === 'trial' ? 'trial' : (store.plan || 'basic');
-    const override = store.notificationQuotaOverride;
-    return Number.isFinite(override) ? { plan, unlimited: false, limit: override } : { plan, ...NOTIFICATION_POLICY };
+    const plan = store.plan || 'free';
+    return { plan, ...NOTIFICATION_POLICY };
 }
 
 function errorDetails(error) {
@@ -48,19 +47,6 @@ function errorDetails(error) {
 
 async function consumeQuota(store, period) {
     const quota = quotaForStore(store);
-    if (!quota.unlimited) {
-        await NotificationUsage.findOneAndUpdate(
-            { storeId: store.storeId, period },
-            { $setOnInsert: { storeId: store.storeId, period, count: 0 }, $set: { limit: quota.limit, unlimited: false, plan: quota.plan } },
-            { upsert: true, new: true, setDefaultsOnInsert: true }
-        );
-        const usage = await NotificationUsage.findOneAndUpdate(
-            { storeId: store.storeId, period, count: { $lt: quota.limit } },
-            { $inc: { count: 1 } },
-            { new: true }
-        );
-        return { allowed: Boolean(usage), usage: usage || await NotificationUsage.findOne({ storeId: store.storeId, period }), ...quota };
-    }
     const usage = await NotificationUsage.findOneAndUpdate(
         { storeId: store.storeId, period },
         { $inc: { count: 1 }, $set: { limit: null, unlimited: true, plan: quota.plan } },
@@ -123,8 +109,7 @@ async function send({ storeId, queueId = null, lineUserId, type, data = {} }) {
     if (!store) throw new Error('STORE_NOT_FOUND');
     const period = periodFor();
     const quota = await consumeQuota(store, period);
-    const log = await NotificationLog.create({ storeId, queueId, lineUserId, type, period, status: quota.allowed ? 'pending' : 'quota_exceeded', errorCode: quota.allowed ? null : 'STORE_QUOTA_EXCEEDED' });
-    if (!quota.allowed) return { status: 'quota_exceeded', log, usage: quota.usage, limit: quota.limit };
+    const log = await NotificationLog.create({ storeId, queueId, lineUserId, type, period, status: 'pending', errorCode: null });
 
     const message = buildFlexMessage(store, type, data);
     let lastErrorCode = null;

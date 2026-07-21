@@ -77,7 +77,7 @@ router.post('/register', registrationLimit, async (req, res) => {
             ownerId: user._id,
             phone,
             verificationStatus: 'draft',
-            subscriptionStatus: 'expired',
+            subscriptionStatus: 'active',
             plan: 'basic',
             isActive: false
         });

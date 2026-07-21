@@ -1,14 +1,14 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { createElement } from 'react';
-import { ListOrdered, Monitor, QrCode, Settings, CreditCard, Users, LogOut } from 'lucide-react';
+import { ListOrdered, Monitor, QrCode, Settings, BarChart3, Users, LogOut } from 'lucide-react';
 
 const items = [
-    ['/store/queues', 'คิว', ListOrdered],
-    ['/store/monitor', 'หน้าจอ Monitor', Monitor],
+    ['/store/queues', 'Queue', ListOrdered],
+    ['/store/monitor', 'Monitor', Monitor],
     ['/store/qr', 'QR Code', QrCode],
-    ['/store/setup', 'ตั้งค่าร้าน', Settings],
-    ['/store/team', 'พนักงานและสาขา', Users],
-    ['/store/package', 'แพ็กเกจ', CreditCard]
+    ['/store/setup', 'Store Settings', Settings],
+    ['/store/team', 'Team & Branches', Users],
+    ['/store/package', 'LINE Usage', BarChart3]
 ];
 
 export default function MerchantNav() {
@@ -41,7 +41,7 @@ export default function MerchantNav() {
                     display: 'flex', alignItems: 'center', gap: 6, background: isActive ? '#2563eb' : 'transparent'
                 })}>{createElement(Icon, { size: 17 })}{label}</NavLink>
             ))}
-            <button onClick={logout} style={{ marginLeft: 'auto', background: 'transparent', color: 'white', border: 0, display: 'flex', gap: 6, cursor: 'pointer' }}><LogOut size={17} />{localStorage.getItem('platform_account_token') ? 'กลับ Platform Admin' : 'ออกจากระบบ'}</button>
+            <button onClick={logout} style={{ marginLeft: 'auto', background: 'transparent', color: 'white', border: 0, display: 'flex', gap: 6, cursor: 'pointer' }}><LogOut size={17} />{localStorage.getItem('platform_account_token') ? 'Back to Platform Admin' : 'Logout'}</button>
         </nav>
     );
 }

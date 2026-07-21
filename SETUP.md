@@ -142,7 +142,7 @@ npm run migrate:milestone6
 
 The migration creates one `default` branch per existing store, adds the owner as an active `StoreMember`, backfills `branchId` into queues, sessions, counters and store settings, and replaces store-only indexes with branch-scoped indexes. Merchant queue requests use the default branch unless the client sends a validated `x-branch-id` header. The header is resolved only within the token-derived `storeId`; a branch from another store is rejected.
 
-Roles are `owner`, `manager`, `staff`, and `viewer`. Queue mutations, session reset, settings, member management, and billing use explicit permissions. Merchants manage separate staff accounts and branches at `/store/team`.
+Roles are `owner`, `manager`, `staff`, and `viewer`. Queue mutations, session reset, settings, and member management use explicit permissions. Merchants manage separate staff accounts and branches at `/store/team`.
 
 ## Milestone 7 platform control plane
 
@@ -155,7 +155,18 @@ npm run migrate:milestone7
 
 The dedicated control plane is `/platform-admin`. Platform identities use `PLATFORM_ADMIN` or `PLATFORM_SUPPORT`; store identities use `STORE_OWNER` or `STORE_STAFF` plus their `StoreMember` role. A platform identity cannot also be a store member. Support access to a store uses a reason-required, 30-minute impersonation token and creates an immutable platform audit record.
 
-Platform Admin can view stores, subscriptions, queue and LINE usage, delivery errors, revenue, packages and audit records; it can also review/suspend stores, change subscriptions, and set a per-store notification quota override. Stores remain free and unlimited when the override is `null`.
+Platform Admin can view stores, queue and LINE usage, delivery errors, revenue, service model status, and audit records. Subscription and per-store notification quota controls are disabled; stores remain free and unlimited once verified and active.
+
+## Milestone 8 production hardening pre-launch
+
+Run the Milestone 8 migration after deploying the hardening changes:
+
+```bash
+cd server
+npm run migrate:milestone8
+```
+
+This creates the public booking idempotency index, normalizes verified stores to the free active service model, clears subscription end dates and notification quota overrides, and marks notification usage as unlimited. Public LIFF reservations accept an `Idempotency-Key` header to prevent duplicate bookings on customer refresh/retry, and reservation requests are rate-limited per store/source/IP.
 
 In non-production environments, the email verification OTP is returned to the onboarding UI and logged by the server. In production, configure `EMAIL_VERIFICATION_WEBHOOK_URL` (and its optional bearer token); production neither logs nor returns OTP values in API responses.
 

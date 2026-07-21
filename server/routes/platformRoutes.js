@@ -9,7 +9,6 @@ const PlatformAudit = require('../models/PlatformAudit');
 const { requireAccount, requirePlatformAdmin, signImpersonationToken } = require('../services/accountAuth');
 const { requirePlatformPermission } = require('../services/platformPermissions');
 const { ensureStoreQueueSettings } = require('../services/storeProvisioning');
-const { refreshSubscriptionState, subscriptionAllowsQueue } = require('../services/subscriptionService');
 const { periodFor } = require('../services/notificationService');
 
 const router = express.Router();
@@ -31,12 +30,12 @@ async function audit(req, action, { storeId = null, reason, metadata = {} }) {
 
 router.get('/overview', async (req, res) => {
     const period = /^\d{4}-\d{2}$/.test(String(req.query.period || '')) ? req.query.period : periodFor();
-    const [stores, queueCounts, messageCounts, failedMessages, activeSubscriptions] = await Promise.all([
+    const [stores, queueCounts, messageCounts, failedMessages, activeStores] = await Promise.all([
         Store.countDocuments(),
         Queue.aggregate([{ $group: { _id: '$storeId', count: { $sum: 1 } } }]),
         NotificationUsage.aggregate([{ $match: { period } }, { $group: { _id: null, count: { $sum: '$count' } } }]),
         NotificationLog.countDocuments({ period, status: 'failed' }),
-        Store.countDocuments({ subscriptionStatus: { $in: ['trial', 'active'] } })
+        Store.countDocuments({ verificationStatus: 'verified', isActive: true })
     ]);
     res.json({
         period,
@@ -44,7 +43,8 @@ router.get('/overview', async (req, res) => {
         totalQueues: queueCounts.reduce((sum, item) => sum + item.count, 0),
         lineMessages: messageCounts[0]?.count || 0,
         failedMessages,
-        activeSubscriptions
+        activeStores,
+        activeSubscriptions: activeStores
     });
 });
 
@@ -74,7 +74,7 @@ router.post('/stores/:storeId/decision', requirePlatformPermission('stores.revie
     if (action === 'approve') {
         if (store.verificationStatus !== 'pending_verification') return res.status(409).json({ error: 'Store is not pending verification' });
         store.verificationStatus = 'verified';
-        store.isActive = ['trial', 'active'].includes(store.subscriptionStatus) && (!store.trialEndsAt || store.trialEndsAt > now);
+        store.isActive = true;
         store.rejectionReason = null; store.informationRequest = null;
         await ensureStoreQueueSettings(store);
     } else if (action === 'reject') {
@@ -98,30 +98,25 @@ router.get('/subscriptions', async (req, res) => {
 });
 
 router.put('/stores/:storeId/subscription', requirePlatformPermission('subscriptions.manage'), async (req, res) => {
-    const statuses = ['trial', 'active', 'past_due', 'cancelled', 'expired'];
     const plans = ['basic', 'starter', 'pro', 'business'];
-    if (!statuses.includes(req.body.status) || !plans.includes(req.body.plan)) return res.status(400).json({ error: 'Invalid subscription status or plan' });
+    if (req.body.plan && !plans.includes(req.body.plan)) return res.status(400).json({ error: 'Invalid package' });
     const store = await Store.findOne({ storeId: req.params.storeId });
     if (!store) return res.status(404).json({ error: 'Store not found' });
     const before = { status: store.subscriptionStatus, plan: store.plan };
-    store.subscriptionStatus = req.body.status; store.plan = req.body.plan;
-    store.subscriptionEndsAt = req.body.subscriptionEndsAt ? new Date(req.body.subscriptionEndsAt) : null;
-    if (store.subscriptionEndsAt && Number.isNaN(store.subscriptionEndsAt.getTime())) return res.status(400).json({ error: 'Invalid subscription end date' });
-    await refreshSubscriptionState(store);
-    store.isActive = store.verificationStatus === 'verified' && subscriptionAllowsQueue(store);
+    store.subscriptionStatus = 'active';
+    store.plan = req.body.plan || store.plan || 'basic';
+    store.subscriptionEndsAt = null;
+    if (store.verificationStatus === 'verified') store.isActive = true;
     await store.save();
-    await audit(req, 'subscription.update', { storeId: store.storeId, reason: req.body.reason || 'Subscription updated', metadata: { before, after: { status: store.subscriptionStatus, plan: store.plan } } });
+    await audit(req, 'subscription.disabled', { storeId: store.storeId, reason: req.body.reason || 'Subscription controls are disabled', metadata: { before, after: { status: store.subscriptionStatus, plan: store.plan } } });
     res.json({ success: true, store });
 });
 
 router.put('/stores/:storeId/quota', requirePlatformPermission('quota.manage'), async (req, res) => {
-    const value = req.body.limit;
-    const limit = value === null || value === '' ? null : Number(value);
-    if (limit !== null && (!Number.isSafeInteger(limit) || limit < 0)) return res.status(400).json({ error: 'Quota must be a non-negative integer or null' });
-    const store = await Store.findOneAndUpdate({ storeId: req.params.storeId }, { $set: { notificationQuotaOverride: limit } }, { new: true, runValidators: true });
+    const store = await Store.findOneAndUpdate({ storeId: req.params.storeId }, { $set: { notificationQuotaOverride: null } }, { new: true, runValidators: true });
     if (!store) return res.status(404).json({ error: 'Store not found' });
-    await audit(req, 'quota.update', { storeId: store.storeId, reason: req.body.reason || 'Notification quota adjusted', metadata: { limit } });
-    res.json({ storeId: store.storeId, limit, unlimited: limit === null });
+    await audit(req, 'quota.disabled', { storeId: store.storeId, reason: req.body.reason || 'Notification quota controls are disabled', metadata: { limit: null } });
+    res.json({ storeId: store.storeId, limit: null, unlimited: true });
 });
 
 router.get('/errors', async (req, res) => {
@@ -152,13 +147,8 @@ router.post('/stores/:storeId/impersonate', requirePlatformPermission('stores.im
 });
 
 router.get('/revenue', requirePlatformPermission('revenue.view'), async (req, res) => {
-    const [packages, subscriptions] = await Promise.all([
-        PlatformPackage.find({ isActive: true }).lean(),
-        Store.aggregate([{ $match: { subscriptionStatus: 'active' } }, { $group: { _id: '$plan', stores: { $sum: 1 } } }])
-    ]);
-    const packageMap = new Map(packages.map(item => [item.code, item]));
-    const byPackage = subscriptions.map(item => ({ code: item._id, stores: item.stores, monthlyPrice: packageMap.get(item._id)?.monthlyPrice || 0, monthlyRevenue: item.stores * (packageMap.get(item._id)?.monthlyPrice || 0) }));
-    res.json({ currency: 'THB', monthlyRecurringRevenue: byPackage.reduce((sum, item) => sum + item.monthlyRevenue, 0), byPackage });
+    const stores = await Store.countDocuments({ verificationStatus: 'verified', isActive: true });
+    res.json({ currency: 'THB', monthlyRecurringRevenue: 0, byPackage: [{ code: 'free', stores, monthlyPrice: 0, monthlyRevenue: 0 }] });
 });
 
 router.get('/packages', async (req, res) => res.json(await PlatformPackage.find().sort({ monthlyPrice: 1 }).lean()));

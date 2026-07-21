@@ -26,7 +26,7 @@ const createStoreQueueRoutes = require('./routes/storeQueueRoutes');
 const qrRoutes = require('./routes/qrRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const teamRoutes = require('./routes/teamRoutes');
-const { refreshSubscriptionState, subscriptionAllowsQueue } = require('./services/subscriptionService');
+const { refreshSubscriptionState } = require('./services/subscriptionService');
 
 const { client: lineClient } = require('./lineService');
 const NotificationService = require('./services/notificationService');
@@ -138,7 +138,7 @@ app.use('/api/store', createStoreQueueRoutes(broadcastUpdate));
 async function requireActivePublicStore(req, res, next) {
     try {
         const store = await refreshSubscriptionState(await Store.findOne({ storeId: req.storeId }));
-        if (!store || store.verificationStatus !== 'verified' || !store.isActive || !subscriptionAllowsQueue(store)) {
+        if (!store || store.verificationStatus !== 'verified' || !store.isActive) {
             return res.status(403).json({ error: 'Store queue is not active' });
         }
         req.publicStore = store.toObject();

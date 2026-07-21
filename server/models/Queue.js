@@ -33,6 +33,7 @@ const queueSchema = new mongoose.Schema({
         default: () => require('crypto').randomBytes(24).toString('base64url')
     },
     source: { type: String, default: 'main', trim: true, lowercase: true },
+    idempotencyKey: { type: String, default: null, trim: true, select: false },
     status: {
         type: String,
         enum: ['waiting', 'called', 'dining', 'completed', 'cancelled'],
@@ -92,6 +93,10 @@ queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, queueNumbe
 queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, createdAt: 1, manualAction: 1 });
 queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, queueNumber: 1 }, { unique: true });
 queueSchema.index({ storeId: 1, publicToken: 1 }, { unique: true });
+queueSchema.index(
+    { storeId: 1, branchId: 1, sessionId: 1, idempotencyKey: 1 },
+    { unique: true, partialFilterExpression: { idempotencyKey: { $type: 'string' } } }
+);
 
 const Queue = mongoose.model('Queue', queueSchema);
 

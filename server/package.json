@@ -11,6 +11,7 @@
         "migrate:milestone4": "node migrate_milestone4.js",
         "migrate:milestone6": "node migrate_milestone6.js",
         "migrate:milestone7": "node migrate_milestone7.js",
+        "migrate:milestone8": "node migrate_milestone8.js",
         "test": "node --test"
     },
     "keywords": [],
