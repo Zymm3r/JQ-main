@@ -1,172 +1,85 @@
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { QrCode, User, MessageCircle, Phone, Users, LogIn, Clock } from 'lucide-react';
-import { api } from '../api';
-import toast from 'react-hot-toast';
-import liff from '@line/liff';
+import { Link } from 'react-router-dom';
+import { CheckCircle2, LineChart, MessageCircle, QrCode, ShieldCheck, Store, Users } from 'lucide-react';
+
+const steps = [
+    ['1', 'Merchant registers', 'Create a store account, add store details, and submit for platform verification.'],
+    ['2', 'Platform verifies', 'The intermediary reviews the store before its LIFF booking page can accept queues.'],
+    ['3', 'Store prints QR', 'Each store gets a unique QR/LIFF link. Customers scan it with LINE and book instantly.'],
+    ['4', 'Central LINE OA notifies', 'Queue confirmations and calls are sent from the platform LINE Official Account.']
+];
+
+const features = [
+    [QrCode, 'Unique QR per store', 'Every QR resolves to a verified store slug and source.'],
+    [MessageCircle, 'Central LINE notifications', 'Merchants do not need to connect their own LINE OA for MVP.'],
+    [ShieldCheck, 'Tenant-safe access', 'Merchant APIs use the token storeId, not a trusted request body storeId.'],
+    [Users, 'Staff-ready structure', 'Owner, manager, staff, and viewer roles can be added without reshaping the app.']
+];
 
 export default function Home() {
-    const navigate = useNavigate();
-    const [form, setForm] = useState({ name: '', lineId: '', phone: '', pax: 1, timeSlot: '' });
-    const [submitting, setSubmitting] = useState(false);
-    const [profile, setProfile] = useState(null);
-    const [loading, setLoading] = useState(true);
-    const [storeName, setStoreName] = useState('');
-
-    useEffect(() => {
-        api.get('/store').then(response => setStoreName(response.data.name)).catch(() => setStoreName('Store'));
-    }, []);
-
-    useEffect(() => {
-        const initLiff = async () => {
-            try {
-                // Attempt to initialize LIFF
-                // Note: You must set VITE_LIFF_ID in client/.env
-                const liffId = import.meta.env.VITE_LIFF_ID;
-
-                if (!liffId || liffId === 'YOUR_LIFF_ID_HERE') {
-                    // Fallback for demo/dev without LIFF
-                    console.warn("LIFF ID not found. Running in manual mode.");
-                    setLoading(false);
-                    return;
-                }
-
-                await liff.init({ liffId });
-
-                if (liff.isLoggedIn()) {
-                    const profile = await liff.getProfile();
-                    setProfile(profile);
-                    setForm(prev => ({
-                        ...prev,
-                        name: profile.displayName,
-                        lineId: profile.userId
-                    }));
-                } else {
-                    // Auto login if opened in LINE, otherwise show login button
-                    if (liff.isInClient()) {
-                        liff.login();
-                    }
-                }
-            } catch (err) {
-                console.error("LIFF Init Error:", err);
-                toast.error('LINE login is unavailable. You can still enter your details manually.');
-            } finally {
-                setLoading(false);
-            }
-        };
-
-        initLiff();
-    }, []);
-
-    const handleLogin = () => {
-        if (!import.meta.env.VITE_LIFF_ID) {
-            toast.error("LIFF ID not configured");
-            return;
-        }
-        liff.login();
-    };
-
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!form.name) return toast.error('Required: Name');
-
-        setSubmitting(true);
-        try {
-            const res = await api.post('/reserve', form);
-            localStorage.setItem('my_queue', JSON.stringify({ queueId: res.data.id, cancelToken: res.data.cancelToken, ...form }));
-            toast.success('Reservation Success!');
-            navigate(`/queue/${res.data.id}`);
-
-            // Close window if in LINE
-            if (liff.isInClient()) {
-                setTimeout(() => liff.closeWindow(), 2000);
-            }
-        } catch (err) {
-            toast.error(err.response?.data?.error || 'Failed to reserve');
-            if (err.response?.data?.queueId) {
-                navigate(`/queue/${err.response.data.queueId}`);
-            }
-        } finally {
-            setSubmitting(false);
-        }
-    };
-
-    if (loading) {
-        return <div style={{ textAlign: 'center', marginTop: 100 }}>Loading...</div>;
-    }
-
     return (
-        <div className="card" style={{ maxWidth: '500px', margin: '40px auto' }}>
-            <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px', color: 'var(--primary)' }}>
-                    {profile?.pictureUrl ? (
-                        <img src={profile.pictureUrl} alt="Profile" style={{ width: 80, height: 80, borderRadius: '50%', border: '4px solid var(--primary-light)' }} />
-                    ) : (
-                        <QrCode size={64} />
-                    )}
+        <main style={{ maxWidth: 980, margin: '0 auto', padding: '36px 18px 56px' }}>
+            <section className="card" style={{
+                padding: 32,
+                background: 'linear-gradient(135deg, #eff6ff 0%, #ffffff 46%, #f0fdf4 100%)',
+                border: '1px solid #dbeafe'
+            }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#2563eb', fontWeight: 800, marginBottom: 18 }}>
+                    <Store size={22} />
+                    JQ Intermediary Queue Platform
                 </div>
-                <h2>{storeName || '...'}</h2>
-                <p style={{ color: 'var(--text-light)' }}>
-                    {profile ? `สวัสดีคุณ ${profile.displayName}` : 'จองคิวออนไลน์รวดเร็วทันใจ'}
+                <h1 style={{ fontSize: 'clamp(2rem, 6vw, 4rem)', lineHeight: 1.04, marginBottom: 18 }}>
+                    Queue booking through LINE, without making every merchant run their own bot.
+                </h1>
+                <p style={{ color: '#475569', fontSize: '1.08rem', lineHeight: 1.7, maxWidth: 760 }}>
+                    Merchants register and verify their store. Customers scan the store QR, book through LINE LIFF,
+                    and receive queue notifications from the platform’s central LINE Official Account.
                 </p>
-            </div>
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 26 }}>
+                    <Link className="btn btn-primary" to="/register" style={{ width: 'auto', textDecoration: 'none' }}>Register merchant</Link>
+                    <Link className="btn btn-secondary" to="/login" style={{ width: 'auto', textDecoration: 'none' }}>Merchant login</Link>
+                    <Link className="btn btn-secondary" to="/liff/demo-shabu-1?source=main" style={{ width: 'auto', textDecoration: 'none' }}>View demo LIFF</Link>
+                </div>
+            </section>
 
-            <form onSubmit={handleSubmit}>
-                {!profile && (
-                    <div style={{ marginBottom: 20, textAlign: 'center' }}>
-                        <button type="button" onClick={handleLogin} className="btn" style={{ background: '#06C755', color: 'white', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                            <LogIn size={20} /> Login with LINE
-                        </button>
-                        <div style={{ margin: '15px 0', position: 'relative' }}>
-                            <span style={{ background: 'white', padding: '0 10px', color: 'var(--text-light)', fontSize: '0.8rem' }}>หรือ กรอกเอง</span>
-                        </div>
+            <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, marginTop: 18 }}>
+                {features.map(([Icon, title, text]) => (
+                    <div className="card" key={title} style={{ padding: 20 }}>
+                        <Icon size={26} color="#2563eb" />
+                        <h3 style={{ marginTop: 12 }}>{title}</h3>
+                        <p style={{ color: '#64748b', lineHeight: 1.55, marginTop: 8 }}>{text}</p>
                     </div>
-                )}
+                ))}
+            </section>
 
-                <div className="input-group">
-                    <label><User size={18} /> ชื่อ (Name) *</label>
-                    <input
-                        type="text"
-                        required
-                        placeholder="Ex. Somchai"
-                        value={form.name}
-                        onChange={e => setForm({ ...form, name: e.target.value })}
-                        disabled={!!profile} // Lock name if from LIFF
-                        style={{ background: profile ? '#f1f5f9' : 'white' }}
-                    />
+            <section className="card" style={{ marginTop: 18, padding: 24 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+                    <LineChart color="#16a34a" />
+                    <h2>Simple MVP flow</h2>
                 </div>
-
-                <div className="input-group">
-                    <label><Clock size={18} /> Time Slot (ช่วงเวลา)</label>
-                    <select
-                        value={form.timeSlot}
-                        onChange={e => setForm({ ...form, timeSlot: e.target.value })}
-                        style={{ border: '2px solid var(--primary-light)' }}
-                    >
-                        <option value="">คิวปกติ (Now)</option>
-                        {['11:00', '11:30', '12:00', '12:30', '13:00', '13:30', '14:00', '14:30', '15:00', '15:30', '16:00', '16:30', '17:00'].map(t => (
-                            <option key={t} value={t}>{t}</option>
-                        ))}
-                    </select>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+                    {steps.map(([number, title, text]) => (
+                        <div key={number} style={{ border: '1px solid #e2e8f0', borderRadius: 14, padding: 16 }}>
+                            <div style={{
+                                width: 34, height: 34, borderRadius: 17, background: '#dbeafe', color: '#1d4ed8',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800
+                            }}>{number}</div>
+                            <h3 style={{ marginTop: 12 }}>{title}</h3>
+                            <p style={{ color: '#64748b', lineHeight: 1.55, marginTop: 8 }}>{text}</p>
+                        </div>
+                    ))}
                 </div>
+            </section>
 
-                <div className="input-group">
-                    <label><Users size={18} /> Pax (จำนวนคน)</label>
-                    <select
-                        value={form.pax}
-                        onChange={e => setForm({ ...form, pax: parseInt(e.target.value) })}
-                    >
-                        {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
-                            <option key={n} value={n}>{n} คน</option>
-                        ))}
-                    </select>
+            <section className="card" style={{ marginTop: 18, padding: 22, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <CheckCircle2 color="#16a34a" />
+                <div>
+                    <h3>Current rule</h3>
+                    <p style={{ color: '#64748b', lineHeight: 1.6, marginTop: 6 }}>
+                        This build keeps the platform free for merchants: LINE usage is tracked for operations,
+                        but subscription/package limits are not used to block queue actions.
+                    </p>
                 </div>
-
-                <button type="submit" className="btn btn-primary" disabled={submitting} style={{ marginTop: '10px' }}>
-                    {submitting ? 'กำลังจอง...' : 'รับบัตรคิว (Get Queue)'}
-                </button>
-            </form>
-
-        </div>
+            </section>
+        </main>
     );
 }

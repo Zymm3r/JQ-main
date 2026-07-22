@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Navigate, Routes, Route } from 'react-router-dom';
 import { lazy, Suspense } from 'react';
 import { Toaster } from 'react-hot-toast';
 import CustomerQueue from './pages/CustomerQueue';
@@ -29,10 +29,12 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/login" element={<Login />} />
         <Route path="/onboarding" element={<Onboarding />} />
+        <Route path="/store" element={<Navigate to="/store/queues" replace />} />
         <Route path="/store/setup" element={<StoreSetup />} />
         <Route path="/store/queues" element={<MerchantQueues />} />
         <Route path="/store/monitor" element={<MerchantQueues monitor />} />
         <Route path="/store/qr" element={<QrManager />} />
+        <Route path="/store/usage" element={<MerchantPackage />} />
         <Route path="/store/package" element={<MerchantPackage />} />
         <Route path="/store/team" element={<MerchantTeam />} />
         <Route path="/liff" element={<LiffQueue />} />

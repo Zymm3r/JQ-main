@@ -8,7 +8,7 @@ const items = [
     ['/store/qr', 'QR Code', QrCode],
     ['/store/setup', 'Store Settings', Settings],
     ['/store/team', 'Team & Branches', Users],
-    ['/store/package', 'LINE Usage', BarChart3]
+    ['/store/usage', 'LINE Usage', BarChart3]
 ];
 
 export default function MerchantNav() {
