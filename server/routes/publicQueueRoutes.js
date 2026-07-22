@@ -40,6 +40,7 @@ function createPublicQueueRoutes(onUpdate = null) {
         } catch (error) {
             return res.status(400).json({ error: error.message });
         }
+
         const [settings, qrSource] = await Promise.all([
             StoreSetting.findOne({ storeId: req.publicStore.storeId, branchId: req.publicBranch.branchId }).lean(),
             QrSource.findOneAndUpdate(
@@ -48,6 +49,7 @@ function createPublicQueueRoutes(onUpdate = null) {
                 { new: true }
             )
         ]);
+
         if (!qrSource && source !== 'main') return res.status(404).json({ error: 'QR source not found' });
         res.json({
             name: req.publicStore.name,
@@ -65,6 +67,7 @@ function createPublicQueueRoutes(onUpdate = null) {
         if (req.publicStore.verificationStatus !== 'verified' || !req.publicStore.isActive) {
             return res.status(403).json({ error: 'Store queue is not active' });
         }
+
         const customerName = String(req.body.customerName || req.body.name || '').trim();
         const phoneNumber = String(req.body.phoneNumber || req.body.phone || '').trim() || null;
         const pax = Number(req.body.pax ?? 1);
@@ -76,6 +79,7 @@ function createPublicQueueRoutes(onUpdate = null) {
             const source = normalizeSource(req.body.source);
             const sourceRecord = await QrSource.findOne({ storeId: req.publicStore.storeId, key: source, active: true });
             if (!sourceRecord && source !== 'main') return res.status(404).json({ error: 'QR source not found' });
+
             const identity = await resolveLineIdentity(req);
             const queue = await reserve(req.publicStore.storeId, {
                 customerName: customerName || identity.displayName,
@@ -85,6 +89,7 @@ function createPublicQueueRoutes(onUpdate = null) {
                 source,
                 idempotencyKey: String(req.get('idempotency-key') || req.body.idempotencyKey || '').trim().slice(0, 160)
             }, req.publicBranch.branchId);
+
             if (!queue.$wasIdempotentReplay) {
                 await NotificationService.sendForQueue(queue, 'QUEUE_RESERVED', {
                     queueAhead: queue.lastNotifiedQueueAhead,
@@ -93,6 +98,7 @@ function createPublicQueueRoutes(onUpdate = null) {
                 if (sourceRecord) await QrSource.updateOne({ _id: sourceRecord._id }, { $inc: { reservationCount: 1 } });
                 if (onUpdate) await onUpdate(req.publicStore.storeId);
             }
+
             const appBaseUrl = String(process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/$/, '');
             res.status(queue.$wasIdempotentReplay ? 200 : 201).json({
                 ...publicQueue(queue),
