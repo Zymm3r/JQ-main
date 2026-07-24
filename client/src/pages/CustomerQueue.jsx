@@ -39,14 +39,14 @@ export default function CustomerQueue() {
         if (!window.confirm('ต้องการยกเลิกคิวใช่หรือไม่? (Cancel Queue?)')) return;
         try {
             if (String(myReservation.queueId) !== String(id) || !myReservation.cancelToken) {
-                toast.error('This reservation cannot be verified on this device');
+                toast.error('ไม่สามารถยืนยันคิวนี้บนอุปกรณ์นี้ได้');
                 return;
             }
             await api.post('/cancel', { id, cancelToken: myReservation.cancelToken });
             toast.success('ยกเลิกคิวแล้ว');
             fetchQueue(); // Refresh status
         } catch {
-            toast.error('Failed to cancel');
+            toast.error('ยกเลิกคิวไม่สำเร็จ');
         }
     };
 
@@ -58,12 +58,12 @@ export default function CustomerQueue() {
         }
     }, [queue?.status]);
 
-    if (loading) return <div className="card">Loading...</div>;
+    if (loading) return <div className="card">กำลังโหลด...</div>;
     if (!queue) return (
         <div className="card" style={{ textAlign: 'center' }}>
             <AlertCircle size={48} color="var(--text-light)" />
             <h2>ไม่พบข้อมูลคิว</h2>
-            <p>Queue ID {id} not found</p>
+            <p>ไม่พบคิวหมายเลข {id}</p>
             <button onClick={() => navigate('/')} className="btn btn-secondary" style={{ marginTop: 20 }}>
                 กลับหน้าหลัก
             </button>
@@ -76,16 +76,16 @@ export default function CustomerQueue() {
             <div className="card">
                 <div style={{ textAlign: 'center', padding: '20px 0' }}>
                     <div style={{ fontSize: '4rem', fontWeight: 800, color: 'var(--primary)', lineHeight: 1 }}>{queue.id}</div>
-                    <p style={{ color: 'var(--text-light)' }}>หมายเลขคิวของคุณ (Your Queue)</p>
+                    <p style={{ color: 'var(--text-light)' }}>หมายเลขคิวของคุณ</p>
                 </div>
 
                 <div className="status-box" style={{ background: '#f0f9ff', border: '1px solid #bae6fd', padding: 20, borderRadius: 12, marginBottom: 20 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                        <span><Clock size={16} /> รออีกประมาณ (Wait time)</span>
-                        <span style={{ fontWeight: 700 }}>{queue.estimatedWaitTime || '-'} mins</span>
+                        <span><Clock size={16} /> รออีกประมาณ</span>
+                        <span style={{ fontWeight: 700 }}>{queue.estimatedWaitTime || '-'} นาที</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <span><User size={16} /> คิวรอข้างหน้า (Queues ahead)</span>
+                        <span><User size={16} /> คิวรอข้างหน้า</span>
                         <span style={{ fontWeight: 700 }}>{queue.queueAhead || 0} คิว</span>
                     </div>
                 </div>
@@ -96,7 +96,7 @@ export default function CustomerQueue() {
                 </div>
 
                 <button onClick={handleCancel} className="btn btn-danger" style={{ width: '100%' }}>
-                    <XCircle size={16} /> ยกเลิกจอง (Cancel)
+                    <XCircle size={16} /> ยกเลิกคิว
                 </button>
             </div>
         );
@@ -124,7 +124,7 @@ export default function CustomerQueue() {
             <div className="card" style={{ textAlign: 'center', opacity: 0.7 }}>
                 <XCircle size={48} color="var(--danger)" />
                 <h2 style={{ marginTop: 16 }}>คิวถูกยกเลิก</h2>
-                <p>Queue Cancelled</p>
+                <p>ยกเลิกคิวแล้ว</p>
                 <button onClick={() => navigate('/')} className="btn btn-primary" style={{ marginTop: 20 }}>
                     จองคิวใหม่
                 </button>
@@ -138,7 +138,7 @@ export default function CustomerQueue() {
             <div className="card" style={{ textAlign: 'center' }}>
                 <CheckCircle size={48} color="var(--text-light)" />
                 <h2 style={{ marginTop: 16 }}>ขอบคุณที่ใช้บริการ</h2>
-                <p>Completed</p>
+                <p>เสร็จสิ้นแล้ว</p>
                 <button onClick={() => navigate('/')} className="btn btn-secondary" style={{ marginTop: 20 }}>
                     <Home size={16} /> หน้าหลัก
                 </button>
@@ -146,5 +146,5 @@ export default function CustomerQueue() {
         );
     }
 
-    return <div>Unknown Status: {queue.status}</div>;
+    return <div>ไม่รู้จักสถานะคิว: {queue.status}</div>;
 }

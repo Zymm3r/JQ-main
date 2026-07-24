@@ -6,10 +6,10 @@ import { api } from '../api';
 import MerchantNav from '../components/MerchantNav';
 
 const kindLabels = {
-    main: 'Main store QR',
-    point: 'Service point',
-    branch: 'Branch',
-    event: 'Event'
+    main: 'QR หลักของร้าน',
+    point: 'จุดติดตั้ง',
+    branch: 'สาขา',
+    event: 'กิจกรรม'
 };
 
 export default function QrManager() {
@@ -24,7 +24,7 @@ export default function QrManager() {
             setData(response.data);
             setSelected(current => response.data.sources.find(item => item.id === current?.id) || response.data.sources[0]);
         } catch (error) {
-            toast.error(error.response?.data?.error || 'Unable to load QR codes');
+            toast.error(error.response?.data?.error || 'โหลด QR Code ไม่สำเร็จ');
         }
     };
 
@@ -46,7 +46,7 @@ export default function QrManager() {
         ctx.fillStyle = '#172554';
         ctx.textAlign = 'center';
         ctx.font = '700 64px sans-serif';
-        ctx.fillText(data.store.name || 'Queue Store', 620, 180);
+        ctx.fillText(data.store.name || 'ร้านค้า', 620, 180);
         ctx.font = '500 38px sans-serif';
         ctx.fillText(selected.name, 620, 255);
 
@@ -55,12 +55,12 @@ export default function QrManager() {
         ctx.drawImage(qr, 210, 350, 820, 820);
 
         ctx.font = '600 42px sans-serif';
-        ctx.fillText('Scan with LINE to join the queue', 620, 1300);
+        ctx.fillText('สแกนด้วย LINE เพื่อรับคิว', 620, 1300);
         ctx.fillStyle = '#475569';
         ctx.font = '28px sans-serif';
         ctx.fillText(selected.liffUrl, 620, 1390, 1040);
         ctx.font = '24px sans-serif';
-        ctx.fillText('Queue notifications are sent by the central platform LINE OA.', 620, 1450, 1040);
+        ctx.fillText('ระบบจะแจ้งเตือนคิวผ่าน LINE Official Account กลางของแพลตฟอร์ม', 620, 1450, 1040);
         return canvas;
     };
 
@@ -82,7 +82,7 @@ export default function QrManager() {
 
     const copyLink = async () => {
         await navigator.clipboard.writeText(selected.liffUrl);
-        toast.success('LIFF link copied');
+        toast.success('คัดลอกลิงก์ LIFF แล้ว');
     };
 
     const create = async event => {
@@ -91,14 +91,14 @@ export default function QrManager() {
             await api.post('/store/qr-sources', form);
             setForm({ name: '', key: '', kind: 'point', branchName: '' });
             await load();
-            toast.success('QR source created');
+            toast.success('สร้าง QR แล้ว');
         } catch (error) {
-            toast.error(error.response?.data?.error || 'Unable to create QR source');
+            toast.error(error.response?.data?.error || 'สร้าง QR ไม่สำเร็จ');
         }
     };
 
     const remove = async source => {
-        if (!confirm(`Delete ${source.name}?`)) return;
+        if (!confirm(`ลบ ${source.name}?`)) return;
         await api.delete(`/store/qr-sources/${source.id}`);
         await load();
     };
@@ -107,13 +107,13 @@ export default function QrManager() {
         <div>
             <MerchantNav />
             <main style={{ maxWidth: 1100, margin: '28px auto', padding: '0 18px' }}>
-                <h1>Store QR Codes</h1>
+                <h1>QR Code ของร้าน</h1>
                 <p style={{ color: '#64748b', lineHeight: 1.6, marginTop: 8 }}>
-                    Generate a unique QR code for this store. Customers scan it with LINE, open the store LIFF page,
-                    reserve a queue, and receive notifications from the central platform LINE Official Account.
+                    สร้าง QR Code เฉพาะร้านนี้ ลูกค้าสแกนด้วย LINE เพื่อเปิดหน้า LIFF รับคิว
+                    และรับข้อความแจ้งเตือนผ่าน LINE Official Account กลางของแพลตฟอร์ม
                 </p>
 
-                {!data ? <p style={{ marginTop: 24 }}>Loading...</p> : (
+                {!data ? <p style={{ marginTop: 24 }}>กำลังโหลด...</p> : (
                     <div className="grid-2" style={{ marginTop: 24, alignItems: 'start' }}>
                         <section className="card" style={{ textAlign: 'center' }}>
                             <h2>{data.store.name}</h2>
@@ -123,15 +123,15 @@ export default function QrManager() {
                                 {selected?.liffUrl}
                             </div>
                             <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-                                <button className="btn btn-primary" onClick={downloadPng} style={{ width: 'auto' }}><Download size={16} /> Download PNG</button>
-                                <button className="btn btn-secondary" onClick={downloadPdf} style={{ width: 'auto' }}><FileDown size={16} /> Download PDF</button>
-                                <button className="btn btn-secondary" onClick={copyLink} style={{ width: 'auto' }}><Copy size={16} /> Copy LIFF link</button>
+                                <button className="btn btn-primary" onClick={downloadPng} style={{ width: 'auto' }}><Download size={16} /> ดาวน์โหลด PNG</button>
+                                <button className="btn btn-secondary" onClick={downloadPdf} style={{ width: 'auto' }}><FileDown size={16} /> ดาวน์โหลด PDF</button>
+                                <button className="btn btn-secondary" onClick={copyLink} style={{ width: 'auto' }}><Copy size={16} /> คัดลอกลิงก์ LIFF</button>
                             </div>
                         </section>
 
                         <section>
                             <div className="card">
-                                <h3>QR sources</h3>
+                                <h3>รายการ QR</h3>
                                 {data.sources.map(source => (
                                     <div
                                         key={source.id}
@@ -150,14 +150,14 @@ export default function QrManager() {
                                         <div>
                                             <strong>{source.name}</strong>
                                             <div style={{ fontSize: 12, color: '#64748b' }}>
-                                                {kindLabels[source.kind] || source.kind} · scan {source.scanCount} · reserve {source.reservationCount}
+                                                {kindLabels[source.kind] || source.kind} · สแกน {source.scanCount} · รับคิว {source.reservationCount}
                                             </div>
                                         </div>
                                         {source.kind !== 'main' && (
                                             <button
                                                 onClick={event => { event.stopPropagation(); remove(source); }}
                                                 style={{ border: 0, background: 'transparent', color: '#dc2626' }}
-                                                aria-label={`Delete ${source.name}`}
+                                                aria-label={`ลบ ${source.name}`}
                                             >
                                                 <Trash2 size={17} />
                                             </button>
@@ -167,21 +167,21 @@ export default function QrManager() {
                             </div>
 
                             <form className="card" style={{ marginTop: 16 }} onSubmit={create}>
-                                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Plus size={18} /> Create extra QR</h3>
+                                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Plus size={18} /> สร้าง QR เพิ่ม</h3>
                                 <p style={{ color: '#64748b', fontSize: 14, lineHeight: 1.5, marginTop: 8 }}>
-                                    Use extra QR sources for branches, front desk counters, table tents, or campaigns.
+                                    ใช้ QR เพิ่มสำหรับสาขา จุดหน้าร้าน โต๊ะประชาสัมพันธ์ หรือแคมเปญ
                                 </p>
                                 <div className="input-group" style={{ marginTop: 16 }}>
-                                    <label>Display name</label>
+                                    <label>ชื่อที่แสดง</label>
                                     <input
                                         required
-                                        placeholder="Front desk"
+                                        placeholder="หน้าร้าน"
                                         value={form.name}
                                         onChange={e => setForm({ ...form, name: e.target.value })}
                                     />
                                 </div>
                                 <div className="input-group">
-                                    <label>Source key</label>
+                                    <label>รหัสแหล่งที่มา</label>
                                     <input
                                         required
                                         placeholder="front-desk"
@@ -190,20 +190,20 @@ export default function QrManager() {
                                     />
                                 </div>
                                 <div className="input-group">
-                                    <label>Type</label>
+                                    <label>ประเภท</label>
                                     <select value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}>
-                                        <option value="point">Service point</option>
-                                        <option value="branch">Branch</option>
-                                        <option value="event">Event</option>
+                                        <option value="point">จุดติดตั้ง</option>
+                                        <option value="branch">สาขา</option>
+                                        <option value="event">กิจกรรม</option>
                                     </select>
                                 </div>
                                 {form.kind === 'branch' && (
                                     <div className="input-group">
-                                        <label>Branch name</label>
+                                        <label>ชื่อสาขา</label>
                                         <input value={form.branchName} onChange={e => setForm({ ...form, branchName: e.target.value })} />
                                     </div>
                                 )}
-                                <button className="btn btn-primary">Create QR</button>
+                                <button className="btn btn-primary">สร้าง QR</button>
                             </form>
                         </section>
                     </div>

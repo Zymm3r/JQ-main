@@ -5,6 +5,18 @@ import { CheckCircle, Circle } from 'lucide-react';
 import { api } from '../api';
 import { clearAccountSession, getAccountToken } from '../utils/account';
 
+const errorMessages = {
+    'Invalid or expired verification code': 'รหัสยืนยันไม่ถูกต้องหรือหมดอายุ',
+    'Please wait before requesting another code': 'กรุณารอสักครู่ก่อนขอรหัสใหม่',
+    'Unable to send verification code': 'ส่งรหัสยืนยันไม่สำเร็จ',
+    'Verification failed': 'ยืนยันอีเมลไม่สำเร็จ'
+};
+
+function thaiError(error, fallback = 'ทำรายการไม่สำเร็จ') {
+    const message = error.response?.data?.error;
+    return errorMessages[message] || message || fallback;
+}
+
 export default function Onboarding() {
     const navigate = useNavigate();
     const [profile, setProfile] = useState(null);
@@ -25,9 +37,9 @@ export default function Onboarding() {
             localStorage.removeItem('dev_verification_code');
             const { data } = await api.get('/auth/me');
             setProfile(data);
-            toast.success('Email verified');
+            toast.success('ยืนยันอีเมลสำเร็จ');
         } catch (error) {
-            toast.error(error.response?.data?.error || 'Verification failed');
+            toast.error(thaiError(error));
         }
     };
 
@@ -38,13 +50,13 @@ export default function Onboarding() {
                 localStorage.setItem('dev_verification_code', data.devVerificationCode);
                 setCode(data.devVerificationCode);
             }
-            toast.success('Verification code sent');
+            toast.success('ส่งรหัสยืนยันแล้ว');
         } catch (error) {
-            toast.error(error.response?.data?.error || 'Unable to resend code');
+            toast.error(thaiError(error, 'ส่งรหัสยืนยันไม่สำเร็จ'));
         }
     };
 
-    if (!profile) return <div className="card">Loading...</div>;
+    if (!profile) return <div className="card">กำลังโหลด...</div>;
     const verified = profile.user.emailVerified;
     const setupComplete = Boolean(profile.store?.name && profile.store?.slug);
 
@@ -56,12 +68,15 @@ export default function Onboarding() {
                 <Step done title="สร้างบัญชี" />
                 <Step done={verified} title="ยืนยันอีเมล" />
                 <Step done={setupComplete} title="กรอกข้อมูลร้านและหลักฐาน" />
-                <Step done={profile.store?.verificationStatus === 'pending_verification'} title="ส่งตรวจสอบ" />
+                <Step done={profile.store?.verificationStatus === 'pending_verification'} title="ส่งให้แพลตฟอร์มตรวจสอบ" />
                 <Step done={profile.store?.verificationStatus === 'verified'} title="อนุมัติและเปิดใช้งานร้าน" />
             </div>
             {!verified ? (
                 <form onSubmit={verify}>
-                    <div className="input-group"><label>รหัส OTP 6 หลัก</label><input inputMode="numeric" pattern="[0-9]{6}" value={code} onChange={event => setCode(event.target.value)} required /></div>
+                    <div className="input-group">
+                        <label>รหัส OTP 6 หลัก</label>
+                        <input inputMode="numeric" pattern="[0-9]{6}" value={code} onChange={event => setCode(event.target.value)} required />
+                    </div>
                     <button className="btn btn-primary">ยืนยันอีเมล</button>
                     <button type="button" className="btn btn-secondary" style={{ marginTop: 10 }} onClick={resend}>ส่งรหัสอีกครั้ง</button>
                 </form>

@@ -10,6 +10,34 @@ function makeIdempotencyKey() {
     return `reserve-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function resolveLiffTarget(routeSlug, params) {
+    const fromQuery = params.get('store');
+    const rawState = params.get('liff.state') || '';
+    let stateSlug = '';
+    let stateSource = '';
+
+    if (rawState) {
+        try {
+            const stateUrl = new URL(rawState, window.location.origin);
+            const segments = stateUrl.pathname.split('/').filter(Boolean);
+            const cleanSegments = segments[0] === 'liff' ? segments.slice(1) : segments;
+            stateSlug = cleanSegments[0] || '';
+            stateSource = stateUrl.searchParams.get('source') || '';
+        } catch {
+            const [pathPart, queryPart] = rawState.split('?');
+            const segments = String(pathPart || '').split('/').filter(Boolean);
+            const cleanSegments = segments[0] === 'liff' ? segments.slice(1) : segments;
+            stateSlug = cleanSegments[0] || '';
+            stateSource = new URLSearchParams(queryPart || '').get('source') || '';
+        }
+    }
+
+    return {
+        liffSlug: routeSlug || fromQuery || stateSlug,
+        source: params.get('source') || stateSource || 'main'
+    };
+}
+
 function errorText(value, fallback = 'ทำรายการไม่สำเร็จ') {
     const map = {
         'Store not found': 'ไม่พบร้านนี้ กรุณาสแกน QR ใหม่อีกครั้ง',
@@ -30,8 +58,7 @@ function errorText(value, fallback = 'ทำรายการไม่สำเ
 export default function LiffQueue() {
     const { liffSlug: routeSlug } = useParams();
     const [params] = useSearchParams();
-    const liffSlug = routeSlug || params.get('store');
-    const source = params.get('source') || 'main';
+    const { liffSlug, source } = resolveLiffTarget(routeSlug, params);
     const [store, setStore] = useState(null);
     const [profile, setProfile] = useState(null);
     const [lineReady, setLineReady] = useState(false);
@@ -66,7 +93,10 @@ export default function LiffQueue() {
         });
     }, [liffSlug, source]);
 
-    const login = () => liff.login({ redirectUri: window.location.href });
+    const login = () => {
+        const cleanUrl = `${window.location.origin}/liff/${encodeURIComponent(liffSlug)}?source=${encodeURIComponent(source)}`;
+        liff.login({ redirectUri: cleanUrl });
+    };
 
     const submit = async event => {
         event.preventDefault();

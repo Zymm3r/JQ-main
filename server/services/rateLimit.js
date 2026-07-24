@@ -12,7 +12,7 @@ function createRateLimiter({ windowMs, max, key = req => req.ip }) {
         attempts.set(entryKey, entry);
         res.set('RateLimit-Limit', String(max));
         res.set('RateLimit-Remaining', String(Math.max(0, max - entry.count)));
-        if (entry.count > max) return res.status(429).json({ error: 'Too many attempts. Please try again later.' });
+        if (entry.count > max) return res.status(429).json({ error: 'พยายามหลายครั้งเกินไป กรุณาลองใหม่ภายหลัง' });
         next();
     };
 }

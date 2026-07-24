@@ -26,7 +26,7 @@ export default function Monitor() {
                 {/* Left: Called (Flashy) */}
                 <div className="card" style={{ background: '#ecfccb', display: 'flex', flexDirection: 'column' }}>
                     <h1 style={{ textAlign: 'center', fontSize: '3rem', color: '#3f6212', marginBottom: 30, borderBottom: '2px solid #3f6212', paddingBottom: 10 }}>
-                        เชิญหมายเลข (Called)
+                        เชิญหมายเลข
                     </h1>
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                         {calledQueues.map(q => (
@@ -47,7 +47,7 @@ export default function Monitor() {
                 {/* Right: Waiting */}
                 <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
                     <h1 style={{ textAlign: 'center', fontSize: '2.5rem', color: 'var(--primary)', marginBottom: 30, borderBottom: '2px solid var(--primary)', paddingBottom: 10 }}>
-                        รอสักครู่ (Waiting)
+                        รอสักครู่
                     </h1>
                     <div style={{ flex: 1, overflowY: 'auto' }}>
                         {waitingQueues.map(q => (

@@ -72,9 +72,9 @@ export default function AdminDashboard() {
     const handleCall = async (id) => {
         try {
             await api.post('/admin/call', { id });
-            toast.success(`Called Q${id}`);
+            toast.success(`เรียกคิว Q${id} แล้ว`);
         } catch {
-            toast.error('Failed to call');
+            toast.error('เรียกคิวไม่สำเร็จ');
         }
     };
 
@@ -83,18 +83,18 @@ export default function AdminDashboard() {
             await api.post('/admin/seat', { id });
             toast.success(`Seated Q${id}`);
         } catch {
-            toast.error('Failed to seat');
+            toast.error('รับลูกค้าเข้าร้านไม่สำเร็จ');
         }
     };
 
     const handleComplete = async (id, skipConfirm = false) => {
-        if (!skipConfirm && !window.confirm(`Clear Dining Q${id}?`)) return;
+        if (!skipConfirm && !window.confirm(`ปิดคิวที่กำลังทาน Q${id}?`)) return;
         try {
             await api.post('/admin/complete', { id });
-            if (!skipConfirm) toast.success(`Completed Q${id}`);
+            if (!skipConfirm) toast.success(`ปิดคิว Q${id} แล้ว`);
         } catch (err) {
             console.error(err);
-            if (!skipConfirm) toast.error('Failed to complete');
+            if (!skipConfirm) toast.error('ปิดคิวไม่สำเร็จ');
         }
     };
 
@@ -104,7 +104,7 @@ export default function AdminDashboard() {
             await api.post('/admin/cancel', { id });
             toast.success(`Cancelled Q${id}`);
         } catch {
-            toast.error('Failed to cancel');
+            toast.error('ยกเลิกคิวไม่สำเร็จ');
         }
     };
 
@@ -115,7 +115,7 @@ export default function AdminDashboard() {
             toast.success('Reset Successful');
             fetchStats();
         } catch {
-            toast.error('Failed to reset');
+            toast.error('รีเซ็ตคิวไม่สำเร็จ');
         }
     };
 
@@ -125,7 +125,7 @@ export default function AdminDashboard() {
             toast.success('Settings Saved');
             setShowSettings(false);
         } catch {
-            toast.error('Failed to save settings');
+            toast.error('บันทึกการตั้งค่าไม่สำเร็จ');
         }
     };
 
@@ -191,7 +191,7 @@ export default function AdminDashboard() {
                         <button onClick={() => window.open('/monitor', '_blank')} className="btn-secondary" style={{ padding: '8px' }} title="Open Monitor">
                             <Tv size={18} />
                         </button>
-                        <button onClick={handleLogout} className="btn-secondary" style={{ padding: '8px', color: 'var(--text-light)' }} title="Logout">
+                        <button onClick={handleLogout} className="btn-secondary" style={{ padding: '8px', color: 'var(--text-light)' }} title="ออกจากระบบ">
                             <LogOut size={18} />
                         </button>
                     </div>
@@ -226,15 +226,15 @@ export default function AdminDashboard() {
 
                 <div className="grid-2">
                     <div className="stat-box" style={{ background: '#eff6ff', padding: 15, borderRadius: 8 }}>
-                        <div style={{ color: 'var(--text-light)', fontSize: '0.9rem' }}>Waiting</div>
+                        <div style={{ color: 'var(--text-light)', fontSize: '0.9rem' }}>รอคิว</div>
                         <div style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)' }}>{stats.waiting}</div>
                     </div>
                     <div className="stat-box" style={{ background: '#fefce8', padding: 15, borderRadius: 8 }}>
-                        <div style={{ color: 'var(--text-light)', fontSize: '0.9rem' }}>Dining</div>
+                        <div style={{ color: 'var(--text-light)', fontSize: '0.9rem' }}>กำลังทาน</div>
                         <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#ca8a04' }}>{diningQueues.length}</div>
                     </div>
                     <div className="stat-box" style={{ background: '#f8fafc', padding: 15, borderRadius: 8 }}>
-                        <div style={{ color: 'var(--text-light)', fontSize: '0.9rem' }}>Completed</div>
+                        <div style={{ color: 'var(--text-light)', fontSize: '0.9rem' }}>เสร็จสิ้น</div>
                         <div style={{ fontSize: '1.5rem', fontWeight: 700 }}>{stats.completed}</div>
                     </div>
                     <div className="stat-box" style={{ background: '#fef2f2', padding: 15, borderRadius: 8 }}>
@@ -248,7 +248,7 @@ export default function AdminDashboard() {
                 {/* 1. Dining (Priority) */}
                 <div className="section-col">
                     <h3 style={{ color: '#ca8a04', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Utensils size={20} /> ทานอยู่ (Dining)
+                        <Utensils size={20} /> ทานอยู่
                     </h3>
                     <div className="queue-list">
                         {diningQueues.length === 0 ? <EmptyState text="No dining tables" /> : diningQueues.map(q => (
@@ -284,7 +284,7 @@ export default function AdminDashboard() {
                 {/* 2. Called */}
                 <div className="section-col">
                     <h3 style={{ color: 'var(--success)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Bell size={20} /> เรียกแล้ว (Called)
+                        <Bell size={20} /> เรียกแล้ว
                     </h3>
                     <div className="queue-list">
                         {calledQueues.length === 0 ? <EmptyState text="No called queues" /> : calledQueues.map(q => (
@@ -299,7 +299,7 @@ export default function AdminDashboard() {
                                     </div>
                                 </div>
                                 <button onClick={() => handleSeat(q.id)} className="btn btn-success" style={{ width: '100%' }}>
-                                    <CheckCircle size={16} style={{ marginRight: 5 }} /> Customer Seated
+                                    <CheckCircle size={16} style={{ marginRight: 5 }} /> รับเข้าร้านแล้ว
                                 </button>
                             </div>
                         ))}
@@ -309,10 +309,10 @@ export default function AdminDashboard() {
                 {/* 3. Waiting */}
                 <div className="section-col">
                     <h3 style={{ color: 'var(--primary)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <Users size={20} /> รอคิว (Waiting)
+                        <Users size={20} /> รอคิว
                     </h3>
                     <div className="queue-list">
-                        {waitingQueues.length === 0 ? <EmptyState text="No waiting queues" /> : waitingQueues.map(q => (
+                        {waitingQueues.length === 0 ? <EmptyState text="ยังไม่มีคิวที่รออยู่" /> : waitingQueues.map(q => (
                             <div key={q.id} className="card queue-item-row">
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

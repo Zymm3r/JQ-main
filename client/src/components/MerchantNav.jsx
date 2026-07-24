@@ -3,12 +3,12 @@ import { createElement } from 'react';
 import { ListOrdered, Monitor, QrCode, Settings, BarChart3, Users, LogOut } from 'lucide-react';
 
 const items = [
-    ['/store/queues', 'Queue', ListOrdered],
-    ['/store/monitor', 'Monitor', Monitor],
+    ['/store/queues', 'คิวร้าน', ListOrdered],
+    ['/store/monitor', 'จอมอนิเตอร์', Monitor],
     ['/store/qr', 'QR Code', QrCode],
-    ['/store/setup', 'Store Settings', Settings],
-    ['/store/team', 'Team & Branches', Users],
-    ['/store/usage', 'LINE Usage', BarChart3]
+    ['/store/setup', 'ตั้งค่าร้าน', Settings],
+    ['/store/team', 'ทีมงานและสาขา', Users],
+    ['/store/usage', 'การใช้งาน LINE', BarChart3]
 ];
 
 export default function MerchantNav() {
@@ -34,14 +34,14 @@ export default function MerchantNav() {
     };
     return (
         <nav style={{ background: '#172554', color: 'white', padding: '12px 18px', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <strong style={{ marginRight: 12 }}>Merchant</strong>
+            <strong style={{ marginRight: 12 }}>ร้านค้า</strong>
             {visibleItems.map(([to, label, Icon]) => (
                 <NavLink key={to} to={to} style={({ isActive }) => ({
                     color: 'white', textDecoration: 'none', padding: '9px 12px', borderRadius: 9,
                     display: 'flex', alignItems: 'center', gap: 6, background: isActive ? '#2563eb' : 'transparent'
                 })}>{createElement(Icon, { size: 17 })}{label}</NavLink>
             ))}
-            <button onClick={logout} style={{ marginLeft: 'auto', background: 'transparent', color: 'white', border: 0, display: 'flex', gap: 6, cursor: 'pointer' }}><LogOut size={17} />{localStorage.getItem('platform_account_token') ? 'Back to Platform Admin' : 'Logout'}</button>
+            <button onClick={logout} style={{ marginLeft: 'auto', background: 'transparent', color: 'white', border: 0, display: 'flex', gap: 6, cursor: 'pointer' }}><LogOut size={17} />{localStorage.getItem('platform_account_token') ? 'กลับหน้าแอดมินแพลตฟอร์ม' : 'ออกจากระบบ'}</button>
         </nav>
     );
 }
