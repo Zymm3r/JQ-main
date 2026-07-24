@@ -70,10 +70,12 @@ function createPublicQueueRoutes(onUpdate = null) {
 
         const customerName = String(req.body.customerName || req.body.name || '').trim();
         const phoneNumber = String(req.body.phoneNumber || req.body.phone || '').trim() || null;
+        const timeSlot = String(req.body.timeSlot || req.body.time_slot || '').trim() || null;
         const pax = Number(req.body.pax ?? 1);
         if (!customerName || customerName.length > 120) return res.status(400).json({ error: 'Customer name is required' });
         if (!Number.isSafeInteger(pax) || pax < 1 || pax > 100) return res.status(400).json({ error: 'Pax must be an integer from 1 to 100' });
         if (phoneNumber && phoneNumber.length > 30) return res.status(400).json({ error: 'Phone number is too long' });
+        if (timeSlot && timeSlot.length > 30) return res.status(400).json({ error: 'Time slot is too long' });
 
         try {
             const source = normalizeSource(req.body.source);
@@ -84,6 +86,7 @@ function createPublicQueueRoutes(onUpdate = null) {
             const queue = await reserve(req.publicStore.storeId, {
                 customerName: customerName || identity.displayName,
                 phoneNumber,
+                timeSlot,
                 lineUserId: identity.lineUserId,
                 pax,
                 source,

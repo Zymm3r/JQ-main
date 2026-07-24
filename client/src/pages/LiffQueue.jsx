@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { CheckCircle2, LogIn, MessageCircle, Phone, QrCode, ShieldCheck, User, Users } from 'lucide-react';
+import { CheckCircle2, Clock, LogIn, MessageCircle, QrCode, ShieldCheck, User, Users } from 'lucide-react';
 import liff from '@line/liff';
 import toast from 'react-hot-toast';
 import { api } from '../api';
@@ -45,6 +45,7 @@ function errorText(value, fallback = 'ทำรายการไม่สำเ
         'Customer name is required': 'กรุณากรอกชื่อ',
         'Pax must be an integer from 1 to 100': 'จำนวนคนต้องอยู่ระหว่าง 1-100 คน',
         'Phone number is too long': 'เบอร์โทรศัพท์ยาวเกินไป',
+        'Time slot is too long': 'ช่วงเวลายาวเกินไป',
         LINE_LOGIN_REQUIRED: 'กรุณาเข้าสู่ระบบด้วย LINE ก่อนรับคิว',
         INVALID_LINE_SESSION: 'เซสชัน LINE หมดอายุ กรุณาเข้าสู่ระบบใหม่',
         NO_ACTIVE_SESSION: 'ร้านยังไม่เปิดรับคิวในขณะนี้',
@@ -62,7 +63,7 @@ export default function LiffQueue() {
     const [store, setStore] = useState(null);
     const [profile, setProfile] = useState(null);
     const [lineReady, setLineReady] = useState(false);
-    const [form, setForm] = useState({ customerName: '', pax: 1, phoneNumber: '' });
+    const [form, setForm] = useState({ customerName: '', pax: 1, timeSlot: 'now' });
     const [queue, setQueue] = useState(null);
     const [submitting, setSubmitting] = useState(false);
     const [idempotencyKey, setIdempotencyKey] = useState(() => makeIdempotencyKey());
@@ -259,14 +260,10 @@ function QueueForm({ form, profile, queueOpen, sourceName, submitting, onSubmit,
             </div>
 
             <div className="input-group">
-                <label style={labelStyle}><Phone size={18} /> เบอร์โทรศัพท์</label>
-                <input
-                    type="tel"
-                    maxLength="30"
-                    placeholder="08x xxx xxxx"
-                    value={form.phoneNumber}
-                    onChange={event => onChange({ ...form, phoneNumber: event.target.value })}
-                />
+                <label style={labelStyle}><Clock size={18} /> ช่วงเวลา</label>
+                <select value={form.timeSlot} onChange={event => onChange({ ...form, timeSlot: event.target.value })}>
+                    {timeSlotOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
             </div>
 
             <div className="input-group">
@@ -283,6 +280,22 @@ function QueueForm({ form, profile, queueOpen, sourceName, submitting, onSubmit,
     );
 }
 
+const timeSlotOptions = [
+    { value: 'now', label: 'คิวปกติ (Now)' },
+    ...Array.from({ length: 23 }, (_, index) => {
+        const totalMinutes = 11 * 60 + index * 30;
+        const hours = String(Math.floor(totalMinutes / 60)).padStart(2, '0');
+        const minutes = String(totalMinutes % 60).padStart(2, '0');
+        const value = `${hours}:${minutes}`;
+        return { value, label: value };
+    })
+];
+
+function formatTimeSlot(value) {
+    if (!value || value === 'now') return 'คิวปกติ (Now)';
+    return `เวลา ${value}`;
+}
+
 function SuccessState({ queue, liffSlug }) {
     const queueAhead = Number.isFinite(queue.queueAhead) ? queue.queueAhead : null;
     return (
@@ -293,6 +306,7 @@ function SuccessState({ queue, liffSlug }) {
             <p style={mutedStyle}>
                 เวลารอโดยประมาณ {queue.estimatedWaitTime || 0} นาที{queueAhead !== null ? ` · เหลืออีก ${queueAhead} คิวก่อนหน้า` : ''}
             </p>
+            {queue.timeSlot && <p style={mutedStyle}>{formatTimeSlot(queue.timeSlot)}</p>}
             <Link className="btn btn-primary" to={`/liff/${liffSlug}/status/${queue.publicToken}`} style={{ marginTop: 18, textDecoration: 'none' }}>
                 ดูสถานะคิว
             </Link>

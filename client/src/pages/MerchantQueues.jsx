@@ -38,7 +38,7 @@ export default function MerchantQueues({ monitor = false }) {
                                 <span>{labels[queue.status] || queue.status}</span>
                             </div>
                             <h3>{queue.customerName}</h3>
-                            <p>{queue.pax} คน · {queue.phoneNumber || 'ไม่มีเบอร์โทร'}</p>
+                            <p>{queue.pax} คน · {formatTimeSlot(queue.time_slot || queue.timeSlot)}</p>
                             <small>แหล่งที่มา: {queue.source}</small>
                             {!monitor && (
                                 <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
@@ -59,3 +59,8 @@ export default function MerchantQueues({ monitor = false }) {
 
 const colors = { waiting: '#2563eb', called: '#16a34a', dining: '#ca8a04', completed: '#64748b', cancelled: '#dc2626' };
 const labels = { waiting: 'รอคิว', called: 'เรียกแล้ว', dining: 'กำลังใช้บริการ', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิกแล้ว' };
+
+function formatTimeSlot(value) {
+    if (!value || value === 'now') return 'คิวปกติ (Now)';
+    return `เวลา ${value}`;
+}

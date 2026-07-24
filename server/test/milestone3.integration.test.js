@@ -59,10 +59,13 @@ test('Milestone 3 creates tenant QR sources and records LIFF reservation source'
         assert.equal(info.data.name, 'Store alpha');
         assert.equal((await QrSource.findById(source.data.id)).scanCount, 1);
 
-        const reservation = await request(baseUrl, '/api/public/stores/store-alpha-a93k/reserve', { method: 'POST', body: { customerName: 'LIFF Customer', pax: 2, phoneNumber: '0812345678', source: 'front-desk' } });
+        const reservation = await request(baseUrl, '/api/public/stores/store-alpha-a93k/reserve', { method: 'POST', body: { customerName: 'LIFF Customer', pax: 2, timeSlot: '18:30', source: 'front-desk' } });
         assert.equal(reservation.status, 201);
         assert.match(reservation.data.trackingUrl, /\/liff\/store-alpha-a93k\/status\//);
-        assert.equal((await Queue.findById(reservation.data.id)).source, 'front-desk');
+        assert.equal(reservation.data.timeSlot, '18:30');
+        const storedReservation = await Queue.findById(reservation.data.id);
+        assert.equal(storedReservation.source, 'front-desk');
+        assert.equal(storedReservation.time_slot, '18:30');
         assert.equal((await QrSource.findById(source.data.id)).reservationCount, 1);
 
         const idempotentOne = await request(baseUrl, '/api/public/stores/store-alpha-a93k/reserve', {
