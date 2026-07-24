@@ -56,14 +56,14 @@ test('Milestone 4 central notifications provide Flex messages, lifecycle logs, r
         const flexText = JSON.stringify(reserved.message);
         assert.match(flexText, /Shabu Q/);
         assert.match(flexText, /Q1/);
-        assert.match(flexText, /Waiting/);
-        assert.match(flexText, /View queue status/);
-        assert.match(flexText, /Cancel queue/);
-        assert.match(flexText, /central queue platform/);
-        assert.match(flexText, /Sent \d{4}-\d{2}-\d{2}T/);
+        assert.match(flexText, /รอคิว/);
+        assert.match(flexText, /ดูสถานะคิว/);
+        assert.match(flexText, /ยกเลิกคิว/);
+        assert.match(flexText, /แพลตฟอร์มจัดการคิวกลาง/);
+        assert.match(flexText, /ส่งเมื่อ \d{4}-\d{2}-\d{2}T/);
         const completedFlex = JSON.stringify(NotificationService.buildFlexMessage(store.toObject(), 'QUEUE_COMPLETED', { queueNumber: 1, publicToken: queue1.publicToken, status: 'completed', cancellationPossible: false }));
-        assert.match(completedFlex, /View queue status/);
-        assert.doesNotMatch(completedFlex, /Cancel queue/);
+        assert.match(completedFlex, /ดูสถานะคิว/);
+        assert.doesNotMatch(completedFlex, /ยกเลิกคิว/);
 
         let retryAttempts = 0;
         NotificationService.setTransportForTests(async () => {

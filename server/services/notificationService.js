@@ -8,16 +8,16 @@ const QueueSession = require('../models/QueueSession');
 const NOTIFICATION_POLICY = Object.freeze({ unlimited: true, limit: null });
 const RETRYABLE_STATUS_CODES = new Set([408, 409, 429, 500, 502, 503, 504]);
 const MESSAGE_TEXT = {
-    QUEUE_RESERVED: 'Your queue has been reserved.',
-    QUEUE_UPDATED: 'Your queue position has been updated.',
-    QUEUE_NEAR: 'Your queue is almost reached.',
-    QUEUE_CALLED: 'Your queue is ready. Please contact the store.',
-    QUEUE_CANCELLED: 'Your queue has been cancelled.',
-    QUEUE_COMPLETED: 'Your queue has been completed. Thank you.',
-    STORE_CLOSED: 'The store has closed its queue.'
+    QUEUE_RESERVED: 'รับคิวเรียบร้อยแล้ว',
+    QUEUE_UPDATED: 'อัปเดตลำดับคิวของคุณแล้ว',
+    QUEUE_NEAR: 'ใกล้ถึงคิวของคุณแล้ว',
+    QUEUE_CALLED: 'ถึงคิวของคุณแล้ว กรุณาติดต่อพนักงานหน้าร้าน',
+    QUEUE_CANCELLED: 'ยกเลิกคิวของคุณแล้ว',
+    QUEUE_COMPLETED: 'ใช้บริการเสร็จสิ้นแล้ว ขอบคุณค่ะ/ครับ',
+    STORE_CLOSED: 'ร้านปิดรับคิวแล้ว'
 };
 const STATUS_TEXT = {
-    waiting: 'Waiting', called: 'Called', dining: 'In service', completed: 'Completed', cancelled: 'Cancelled', closed: 'Store closed'
+    waiting: 'รอคิว', called: 'เรียกคิวแล้ว', dining: 'กำลังใช้บริการ', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิกแล้ว', closed: 'ร้านปิดรับคิว'
 };
 
 let transport = async (lineUserId, message) => {
@@ -65,35 +65,35 @@ function buildFlexMessage(store, type, data, sentAt = new Date()) {
     const queueNumber = data.queueNumber === undefined || data.queueNumber === null ? '-' : `Q${data.queueNumber}`;
     const status = STATUS_TEXT[data.status] || data.status || '-';
     const details = [];
-    if (Number.isFinite(data.queueAhead)) details.push(`${data.queueAhead} queue${data.queueAhead === 1 ? '' : 's'} remaining`);
-    if (Number.isFinite(data.estimatedWaitTime)) details.push(`Estimated wait ${data.estimatedWaitTime} minutes`);
+    if (Number.isFinite(data.queueAhead)) details.push(`เหลือ ${data.queueAhead} คิวก่อนหน้า`);
+    if (Number.isFinite(data.estimatedWaitTime)) details.push(`รอประมาณ ${data.estimatedWaitTime} นาที`);
     const bodyContents = [
-        { type: 'text', text: store.name || 'Queue Store', weight: 'bold', size: 'xl', wrap: true },
+        { type: 'text', text: store.name || 'ร้านค้า', weight: 'bold', size: 'xl', wrap: true },
         { type: 'text', text: MESSAGE_TEXT[type], size: 'md', wrap: true, margin: 'md' },
         { type: 'text', text: queueNumber, weight: 'bold', size: '3xl', color: '#2563EB', margin: 'lg' },
         { type: 'box', layout: 'baseline', margin: 'md', contents: [
-            { type: 'text', text: 'Status', color: '#64748B', size: 'sm', flex: 2 },
+            { type: 'text', text: 'สถานะ', color: '#64748B', size: 'sm', flex: 2 },
             { type: 'text', text: status, weight: 'bold', size: 'sm', flex: 4, wrap: true }
         ] }
     ];
     if (details.length) bodyContents.push({ type: 'text', text: details.join(' · '), color: '#475569', size: 'sm', wrap: true, margin: 'md' });
     bodyContents.push(
         { type: 'separator', margin: 'lg' },
-        { type: 'text', text: `Sent ${sentAt.toISOString()}`, color: '#94A3B8', size: 'xs', wrap: true, margin: 'md' },
-        { type: 'text', text: 'Queue notifications are provided by the central queue platform.', color: '#94A3B8', size: 'xs', wrap: true, margin: 'sm' }
+        { type: 'text', text: `ส่งเมื่อ ${sentAt.toISOString()}`, color: '#94A3B8', size: 'xs', wrap: true, margin: 'md' },
+        { type: 'text', text: 'ข้อความแจ้งเตือนคิวนี้ส่งโดยแพลตฟอร์มจัดการคิวกลาง', color: '#94A3B8', size: 'xs', wrap: true, margin: 'sm' }
     );
 
     const footerContents = [];
     if (data.publicToken && store.liffSlug) {
         const urls = buildQueueUrls(store, data);
-        footerContents.push({ type: 'button', style: 'primary', color: '#2563EB', action: { type: 'uri', label: 'View queue status', uri: urls.viewUrl } });
+        footerContents.push({ type: 'button', style: 'primary', color: '#2563EB', action: { type: 'uri', label: 'ดูสถานะคิว', uri: urls.viewUrl } });
         if (data.cancellationPossible) {
-            footerContents.push({ type: 'button', style: 'secondary', action: { type: 'uri', label: 'Cancel queue', uri: urls.cancelUrl }, margin: 'sm' });
+            footerContents.push({ type: 'button', style: 'secondary', action: { type: 'uri', label: 'ยกเลิกคิว', uri: urls.cancelUrl }, margin: 'sm' });
         }
     }
     return {
         type: 'flex',
-        altText: `${store.name || 'Store'}: ${MESSAGE_TEXT[type]} ${queueNumber}`.slice(0, 400),
+        altText: `${store.name || 'ร้านค้า'}: ${MESSAGE_TEXT[type]} ${queueNumber}`.slice(0, 400),
         contents: {
             type: 'bubble',
             body: { type: 'box', layout: 'vertical', contents: bodyContents },
