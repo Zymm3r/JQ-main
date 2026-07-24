@@ -1,5 +1,6 @@
 const Store = require('./models/Store');
 const User = require('./models/User');
+const StoreMember = require('./models/StoreMember');
 const Setting = require('./models/Setting');
 const QueueSession = require('./models/QueueSession');
 const { ensureStoreSettings } = require('./services/storeSettingsService');
@@ -72,7 +73,59 @@ async function initDb() {
         }
     }
 
+    if (process.env.DEMO_MERCHANT_EMAIL && process.env.DEMO_MERCHANT_PASSWORD) {
+        await seedDemoMerchantAccount();
+    }
+
     console.log(`Database defaults are ready for store ${storeId}.`);
+}
+
+async function seedDemoMerchantAccount() {
+    const email = process.env.DEMO_MERCHANT_EMAIL.trim().toLowerCase();
+    const password = process.env.DEMO_MERCHANT_PASSWORD;
+    const storeSlug = String(process.env.DEMO_STORE_SLUG || 'demo-shabu-1').trim().toLowerCase();
+    const store = await Store.findOne({ $or: [{ slug: storeSlug }, { liffSlug: storeSlug }] });
+    if (!store) {
+        console.warn(`DEMO_STORE_SLUG=${storeSlug} was configured, but no matching store was found.`);
+        return;
+    }
+
+    let user = await User.findOne({ email }).select('+passwordHash');
+    if (!user) {
+        user = await User.create({
+            email,
+            passwordHash: await hashPin(password),
+            name: process.env.DEMO_MERCHANT_NAME || `${store.name || 'Demo'} Owner`,
+            phone: process.env.DEMO_MERCHANT_PHONE || '0800000000',
+            role: 'STORE_OWNER',
+            status: 'active',
+            emailVerified: true,
+            acceptedTermsAt: new Date()
+        });
+    } else {
+        user.passwordHash = await hashPin(password);
+        user.name = user.name || process.env.DEMO_MERCHANT_NAME || `${store.name || 'Demo'} Owner`;
+        user.phone = user.phone || process.env.DEMO_MERCHANT_PHONE || '0800000000';
+        user.role = 'STORE_OWNER';
+        user.status = 'active';
+        user.emailVerified = true;
+        user.acceptedTermsAt = user.acceptedTermsAt || new Date();
+        await user.save();
+    }
+
+    store.ownerId = user._id;
+    store.verificationStatus = 'verified';
+    store.subscriptionStatus = 'active';
+    store.isActive = true;
+    store.plan = store.plan || 'basic';
+    await store.save();
+
+    await StoreMember.findOneAndUpdate(
+        { storeId: store.storeId, userId: user._id },
+        { $set: { role: 'owner', permissions: [], status: 'active' } },
+        { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+    console.log(`Demo merchant account is ready for store ${store.storeId}.`);
 }
 
 module.exports = { initDb };
