@@ -270,6 +270,7 @@ app.post('/api/reserve', requireActivePublicStore, async (req, res) => {
         );
 
         const cancelToken = crypto.randomBytes(32).toString('base64url');
+        const typedSettings = await StoreSetting.findOne({ storeId: req.storeId, branchId: 'default' }).lean();
         const newQueue = await Queue.create({
             storeId: req.storeId,
             branchId: 'default',
@@ -282,6 +283,9 @@ app.post('/api/reserve', requireActivePublicStore, async (req, res) => {
             pax: pax || 1,
             time_slot: timeSlot || null,
             status: 'waiting',
+            scheduledCallAt: typedSettings?.autoCallEnabled
+                ? new Date(Date.now() + (Number(typedSettings.autoCallDelayMinutes) || 15) * 60_000)
+                : null,
             history: [{ action: 'reserved' }]
         });
 
@@ -393,11 +397,15 @@ app.post('/api/admin/call', async (req, res) => {
             return res.status(400).json({ error: 'No active session found.' });
         }
 
+        const typedSettings = await StoreSetting.findOne({ storeId: req.storeId, branchId: 'default' }).lean();
+        const now = new Date();
         const queue = await Queue.findOneAndUpdate(
             { storeId: req.storeId, branchId: 'default', sessionId, queueNumber: numId, status: 'waiting' },
             {
                 status: 'called',
-                calledAt: new Date(),
+                calledAt: now,
+                seatDeadlineAt: new Date(now.getTime() + (Number(typedSettings?.seatGracePeriodMinutes) || 10) * 60_000),
+                manualAction: true,
                 $push: { history: { action: 'called' } }
             },
             { new: true }
@@ -430,11 +438,15 @@ app.post('/api/admin/seat', async (req, res) => {
             return res.status(400).json({ error: 'No active session found.' });
         }
 
+        const typedSettings = await StoreSetting.findOne({ storeId: req.storeId, branchId: 'default' }).lean();
+        const now = new Date();
         const queue = await Queue.findOneAndUpdate(
             { storeId: req.storeId, branchId: 'default', sessionId, queueNumber: numId, status: { $in: ['waiting', 'called'] } },
             {
                 status: 'dining',
-                seatedAt: new Date(),
+                seatedAt: now,
+                diningDeadlineAt: new Date(now.getTime() + (Number(typedSettings?.diningTimeLimitMinutes) || 90) * 60_000),
+                manualAction: true,
                 $push: { history: { action: 'seated' } }
             },
             { new: true }

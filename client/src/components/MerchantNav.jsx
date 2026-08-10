@@ -41,7 +41,13 @@ export default function MerchantNav() {
                     display: 'flex', alignItems: 'center', gap: 6, background: isActive ? '#2563eb' : 'transparent'
                 })}>{createElement(Icon, { size: 17 })}{label}</NavLink>
             ))}
-            <button onClick={logout} style={{ marginLeft: 'auto', background: 'transparent', color: 'white', border: 0, display: 'flex', gap: 6, cursor: 'pointer' }}><LogOut size={17} />{localStorage.getItem('platform_account_token') ? 'กลับหน้าแอดมินแพลตฟอร์ม' : 'ออกจากระบบ'}</button>
+            <button onClick={logout} style={{ marginLeft: 'auto', background: 'transparent', color: 'white', border: 0, display: 'flex', gap: 6, cursor: 'pointer' }}>
+                <LogOut size={17} />{platformTokenLabel()}
+            </button>
         </nav>
     );
+}
+
+function platformTokenLabel() {
+    return localStorage.getItem('platform_account_token') ? 'กลับหน้าแอดมินแพลตฟอร์ม' : 'ออกจากระบบ';
 }

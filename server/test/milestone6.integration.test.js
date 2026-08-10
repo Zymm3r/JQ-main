@@ -52,6 +52,13 @@ test('Milestone 6 separates staff accounts, enforces permissions and scopes queu
         await QueueSession.create({ storeId: store.storeId, branchId: 'default', sessionId: 'default-session', startedBy: owner._id });
         await Counter.create({ storeId: store.storeId, branchId: 'default', sessionId: 'default-session' });
         const ownerToken = signAccountToken(owner, store);
+        const automationSettings = await request(baseUrl, '/api/store/settings', {
+            method: 'PUT', token: ownerToken,
+            body: { autoCallEnabled: true, autoCallDelayMinutes: 20, seatGracePeriodMinutes: 7, diningTimeLimitMinutes: 75, autoCancelNoShowEnabled: false }
+        });
+        assert.equal(automationSettings.status, 200);
+        assert.equal(automationSettings.data.seatGracePeriodMinutes, 7);
+        assert.ok(automationSettings.data.serverTime);
 
         const addStaff = await request(baseUrl, '/api/store/members', { method: 'POST', token: ownerToken, body: { email: 'm6-staff@example.com', password: 'staff-password', name: 'Staff', phone: '0811111111', role: 'staff' } });
         assert.equal(addStaff.status, 201);
@@ -63,6 +70,12 @@ test('Milestone 6 separates staff accounts, enforces permissions and scopes queu
 
         const queue = await Queue.create({ storeId: store.storeId, branchId: 'default', sessionId: 'default-session', queueNumber: 1, customerName: 'Alice' });
         assert.equal((await request(baseUrl, `/api/store/queues/${queue._id}/call`, { method: 'POST', token: staffToken })).status, 200);
+        const calledQueue = await Queue.findById(queue._id).lean();
+        assert.ok(Math.abs(calledQueue.seatDeadlineAt.getTime() - calledQueue.calledAt.getTime() - 7 * 60_000) < 100);
+        const scheduledQueue = await Queue.create({ storeId: store.storeId, branchId: 'default', sessionId: 'default-session', queueNumber: 2, customerName: 'Scheduled' });
+        const scheduledAt = new Date(Date.now() + 30 * 60_000);
+        assert.equal((await request(baseUrl, `/api/store/queues/${scheduledQueue._id}/schedule`, { method: 'PUT', token: staffToken, body: { scheduledCallAt: scheduledAt } })).status, 200);
+        assert.ok(Math.abs((await Queue.findById(scheduledQueue._id).lean()).scheduledCallAt.getTime() - scheduledAt.getTime()) < 100);
         assert.equal((await request(baseUrl, '/api/store/session/reset', { method: 'POST', token: staffToken })).status, 403);
         assert.equal((await request(baseUrl, '/api/store/settings', { method: 'PUT', token: staffToken, body: { queueOpen: false } })).status, 403);
 
@@ -85,7 +98,7 @@ test('Milestone 6 separates staff accounts, enforces permissions and scopes queu
         await Queue.create({ storeId: store.storeId, branchId: secondBranchId, sessionId: (await QueueSession.findOne({ storeId: store.storeId, branchId: secondBranchId })).sessionId, queueNumber: 1, customerName: 'Branch Two' });
         const defaultQueues = await request(baseUrl, '/api/store/queues', { token: ownerToken });
         const secondQueues = await request(baseUrl, '/api/store/queues', { token: ownerToken, branchId: secondBranchId });
-        assert.deepEqual(defaultQueues.data.map(item => item.customerName), ['Alice']);
+        assert.deepEqual(defaultQueues.data.map(item => item.customerName), ['Alice', 'Scheduled']);
         assert.deepEqual(secondQueues.data.map(item => item.customerName), ['Branch Two']);
         assert.equal((await request(baseUrl, '/api/store/queues', { token: ownerToken, branchId: 'branch-from-another-store' })).status, 404);
         assert.equal(await Branch.countDocuments({ storeId: store.storeId, isDefault: true }), 1);

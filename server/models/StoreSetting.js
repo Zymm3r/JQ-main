@@ -15,6 +15,10 @@ const storeSettingSchema = new mongoose.Schema({
     totalTables: { type: Number, min: 1, default: 10 },
     maxQueueSize: { type: Number, min: 1, default: 100 },
     autoCallEnabled: { type: Boolean, default: false },
+    autoCallDelayMinutes: { type: Number, min: 1, max: 1440, default: 15 },
+    seatGracePeriodMinutes: { type: Number, min: 1, max: 1440, default: 10 },
+    diningTimeLimitMinutes: { type: Number, min: 1, max: 1440, default: 90 },
+    autoCancelNoShowEnabled: { type: Boolean, default: false },
     queueOpen: { type: Boolean, default: true },
     businessHours: { type: [businessHoursSchema], default: [] }
 }, { timestamps: true });

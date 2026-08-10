@@ -9,6 +9,7 @@ const ACTIVE_STATUSES = ['waiting', 'called', 'dining'];
 function publicQueue(queue) {
     const value = queue.toObject ? queue.toObject() : queue;
     return {
+        serverTime: new Date().toISOString(),
         id: value._id,
         queueNumber: value.queueNumber,
         publicToken: value.publicToken,
@@ -20,7 +21,10 @@ function publicQueue(queue) {
         estimatedWaitTime: value.estimatedWaitTime,
         createdAt: value.createdAt,
         calledAt: value.calledAt,
+        scheduledCallAt: value.scheduledCallAt,
+        seatDeadlineAt: value.seatDeadlineAt,
         seatedAt: value.seatedAt,
+        diningDeadlineAt: value.diningDeadlineAt,
         completedAt: value.completedAt,
         cancelledAt: value.cancelledAt
     };
@@ -92,6 +96,9 @@ async function reserve(storeId, input, branchId = 'default') {
             pax: input.pax,
             status: 'waiting',
             estimatedWaitTime,
+            scheduledCallAt: settings.autoCallEnabled
+                ? new Date(Date.now() + (Number(settings.autoCallDelayMinutes) || 15) * 60_000)
+                : null,
             lastNotifiedQueueAhead: activeCount,
             nearNotificationSentAt: activeCount <= 2 ? new Date() : null,
             history: [{ action: 'reserved' }]

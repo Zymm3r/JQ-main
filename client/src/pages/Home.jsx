@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { createElement } from 'react';
 import { CheckCircle2, LineChart, MessageCircle, QrCode, ShieldCheck, Store, Users } from 'lucide-react';
 
 const steps = [
@@ -44,7 +45,7 @@ export default function Home() {
             <section style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 14, marginTop: 18 }}>
                 {features.map(([Icon, title, text]) => (
                     <div className="card" key={title} style={{ padding: 20 }}>
-                        <Icon size={26} color="#2563eb" />
+                        {createElement(Icon, { size: 26, color: '#2563eb' })}
                         <h3 style={{ marginTop: 12 }}>{title}</h3>
                         <p style={{ color: '#64748b', lineHeight: 1.55, marginTop: 8 }}>{text}</p>
                     </div>

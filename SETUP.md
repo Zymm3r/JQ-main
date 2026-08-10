@@ -182,3 +182,16 @@ npm start
 Configure the deployment platform's healthcheck path as `/ping`. This liveness endpoint returns `200` as soon as the HTTP server is listening and does not wait for MongoDB. `/health` is a separate readiness endpoint and returns `503` until MongoDB is connected.
 
 Set all production environment variables on the deployment platform. If the MongoDB Atlas password contains a reserved URI character such as `@`, percent-encode that character in `MONGO_URI` (for example, `@` becomes `%40`).
+
+## Milestone 9 retail queue automation
+
+Back up MongoDB and run the non-destructive migration once:
+
+```bash
+cd server
+npm run migrate:milestone9
+```
+
+Owners and managers configure automatic calls, arrival grace time, dining time limits, and optional no-show cancellation on `/store/queues`. Staff with `queue.call` permission can schedule an individual waiting queue. Automatic seating and automatic table completion were removed because those physical events require staff confirmation.
+
+The worker checks persisted queue deadlines every five seconds by default. Override this only when required with `QUEUE_AUTOMATION_POLL_MS` (minimum 1000 milliseconds). See `RETAIL_OPERATIONS_PLAN.md` for the reviewed milestone plan and complete time-trigger audit.

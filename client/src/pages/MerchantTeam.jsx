@@ -23,7 +23,14 @@ export default function MerchantTeam() {
         }
     };
 
-    useEffect(() => { load(); }, []);
+    useEffect(() => {
+        Promise.all([api.get('/store/members'), api.get('/store/branches')])
+            .then(([memberResponse, branchResponse]) => {
+                setMembers(memberResponse.data);
+                setBranches(branchResponse.data);
+            })
+            .catch(error => toast.error(error.response?.data?.error || 'โหลดข้อมูลพนักงานและสาขาไม่สำเร็จ'));
+    }, []);
 
     const addMember = async event => {
         event.preventDefault();

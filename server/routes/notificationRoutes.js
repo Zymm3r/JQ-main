@@ -1,6 +1,8 @@
 const express = require('express');
 const NotificationLog = require('../models/NotificationLog');
 const StoreSetting = require('../models/StoreSetting');
+const Queue = require('../models/Queue');
+const QueueSession = require('../models/QueueSession');
 const { requireAccount, requireVerifiedAccount } = require('../services/accountAuth');
 const NotificationService = require('../services/notificationService');
 const { requirePermission } = require('../services/memberPermissions');
@@ -35,7 +37,7 @@ router.get('/notifications/logs', async (req, res) => {
 router.get('/settings', async (req, res) => {
     const settings = await StoreSetting.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId }).lean();
     if (!settings) return res.status(404).json({ error: 'Store settings not found' });
-    res.json(settings);
+    res.json({ ...settings, serverTime: new Date().toISOString() });
 });
 
 router.put('/settings', requirePermission('settings.update'), async (req, res) => {
@@ -44,7 +46,9 @@ router.put('/settings', requirePermission('settings.update'), async (req, res) =
     const wasOpen = current.queueOpen;
     const numeric = [
         ['averageTableTime', 1, 1440], ['averageWaitTime', 0, 1440],
-        ['totalTables', 1, 10000], ['maxQueueSize', 1, 100000]
+        ['totalTables', 1, 10000], ['maxQueueSize', 1, 100000],
+        ['autoCallDelayMinutes', 1, 1440], ['seatGracePeriodMinutes', 1, 1440],
+        ['diningTimeLimitMinutes', 1, 1440]
     ];
     for (const [key, min, max] of numeric) {
         if (req.body[key] !== undefined) {
@@ -54,14 +58,31 @@ router.put('/settings', requirePermission('settings.update'), async (req, res) =
         }
     }
     if (req.body.autoCallEnabled !== undefined) current.autoCallEnabled = req.body.autoCallEnabled === true;
+    if (req.body.autoCancelNoShowEnabled !== undefined) current.autoCancelNoShowEnabled = req.body.autoCancelNoShowEnabled === true;
     if (req.body.queueOpen !== undefined) current.queueOpen = req.body.queueOpen === true;
     if (req.body.businessHours !== undefined) {
         if (!Array.isArray(req.body.businessHours) || req.body.businessHours.length > 7) return res.status(400).json({ error: 'businessHours is invalid' });
         current.businessHours = req.body.businessHours;
     }
     await current.save();
+    if (current.autoCallEnabled) {
+        const session = await QueueSession.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId, status: 'active' }).lean();
+        if (session) {
+            const delayMs = current.autoCallDelayMinutes * 60_000;
+            await Queue.updateMany(
+                {
+                    storeId: req.auth.storeId,
+                    branchId: req.auth.branchId,
+                    sessionId: session.sessionId,
+                    status: 'waiting',
+                    scheduledCallAt: null
+                },
+                [{ $set: { scheduledCallAt: { $add: ['$createdAt', delayMs] } } }]
+            );
+        }
+    }
     if (wasOpen && !current.queueOpen) await NotificationService.notifyStoreClosed(req.auth.storeId, req.auth.branchId);
-    res.json(current);
+    res.json({ ...current.toObject(), serverTime: new Date().toISOString() });
 });
 
 module.exports = router;

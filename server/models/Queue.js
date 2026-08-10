@@ -75,10 +75,14 @@ const queueSchema = new mongoose.Schema({
         type: Date,
         default: null
     },
+    scheduledCallAt: { type: Date, default: null },
+    seatDeadlineAt: { type: Date, default: null },
+    diningDeadlineAt: { type: Date, default: null },
     cancelledAt: {
         type: Date,
         default: null
     },
+    cancellationReason: { type: String, default: null, trim: true, maxlength: 80 },
     manualAction: {
         type: Boolean,
         default: false
@@ -91,6 +95,8 @@ const queueSchema = new mongoose.Schema({
 
 queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, queueNumber: 1 });
 queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, createdAt: 1, manualAction: 1 });
+queueSchema.index({ storeId: 1, branchId: 1, status: 1, scheduledCallAt: 1, queueNumber: 1 });
+queueSchema.index({ storeId: 1, branchId: 1, status: 1, seatDeadlineAt: 1 });
 queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, queueNumber: 1 }, { unique: true });
 queueSchema.index({ storeId: 1, publicToken: 1 }, { unique: true });
 queueSchema.index(

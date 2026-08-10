@@ -131,9 +131,8 @@ export default function AdminDashboard() {
 
     const getDiningTime = (startTime) => {
         if (!startTime) return '00:00';
-        // Database stores as UTC string "YYYY-MM-DD HH:MM:SS"
-        // We append "Z" to force browser to interpret as UTC
-        const start = new Date(startTime.endsWith('Z') ? startTime : (startTime + 'Z')).getTime();
+        const start = new Date(startTime).getTime();
+        if (!Number.isFinite(start)) return '00:00';
         const diff = now.getTime() - start;
 
         // Prevent negative time
@@ -147,10 +146,11 @@ export default function AdminDashboard() {
         return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
-    const isOverLimit = (startTime) => {
-        if (!startTime) return false;
-        const start = new Date(startTime.endsWith('Z') ? startTime : (startTime + 'Z')).getTime();
-        return (now.getTime() - start) > (2 * 60 * 60 * 1000); // 2 Hours
+    const isOverLimit = (queue) => {
+        if (queue.diningDeadlineAt) return now.getTime() >= new Date(queue.diningDeadlineAt).getTime();
+        if (!queue.seatedAt) return false;
+        const start = new Date(queue.seatedAt).getTime();
+        return Number.isFinite(start) && now.getTime() - start >= Number(avgTime) * 60_000;
     };
 
     const waitingQueues = queues.filter(q => q.status === 'waiting');
@@ -252,7 +252,7 @@ export default function AdminDashboard() {
                     </h3>
                     <div className="queue-list">
                         {diningQueues.length === 0 ? <EmptyState text="No dining tables" /> : diningQueues.map(q => (
-                            <div key={q.id} className={`card queue-item-row dining ${isOverLimit(q.seatedAt) ? 'overtime' : ''}`}>
+                            <div key={q.id} className={`card queue-item-row dining ${isOverLimit(q) ? 'overtime' : ''}`}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                                         <div className="q-number">{q.id}</div>
@@ -263,8 +263,8 @@ export default function AdminDashboard() {
                                     </div>
                                     <div style={{ textAlign: 'right' }}>
                                         <div className="timer-badge" style={{
-                                            background: isOverLimit(q.seatedAt) ? '#fee2e2' : '#fef9c3',
-                                            color: isOverLimit(q.seatedAt) ? '#dc2626' : '#854d0e',
+                                            background: isOverLimit(q) ? '#fee2e2' : '#fef9c3',
+                                            color: isOverLimit(q) ? '#dc2626' : '#854d0e',
                                         }}>
                                             <Clock size={12} style={{ marginRight: 4 }} />
                                             {getDiningTime(q.seatedAt)}

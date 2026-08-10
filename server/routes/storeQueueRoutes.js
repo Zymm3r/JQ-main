@@ -8,6 +8,7 @@ const { resetSession } = require('../services/queueSessionService');
 const NotificationService = require('../services/notificationService');
 const { requirePermission } = require('../services/memberPermissions');
 const { requireBranch } = require('../services/branchService');
+const StoreSetting = require('../models/StoreSetting');
 
 function createStoreQueueRoutes(onUpdate = null) {
     const router = express.Router();
@@ -36,8 +37,9 @@ function createStoreQueueRoutes(onUpdate = null) {
         try {
             if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid queue ID' });
             const now = new Date();
+            const extraSet = config.buildSet ? await config.buildSet(req, now) : {};
             const update = {
-                $set: { status: config.nextStatus, ...(config.dateField ? { [config.dateField]: now } : {}) },
+                $set: { status: config.nextStatus, ...(config.dateField ? { [config.dateField]: now } : {}), ...extraSet },
                 $push: { history: { action: config.historyAction, timestamp: now } }
             };
             const queue = await Queue.findOneAndUpdate(
@@ -57,10 +59,18 @@ function createStoreQueueRoutes(onUpdate = null) {
     }
 
     router.post('/queues/:id/call', requirePermission('queue.call'), (req, res) => transition(req, res, {
-        allowedStatuses: ['waiting'], nextStatus: 'called', dateField: 'calledAt', historyAction: 'called', notificationType: 'QUEUE_CALLED'
+        allowedStatuses: ['waiting'], nextStatus: 'called', dateField: 'calledAt', historyAction: 'called', notificationType: 'QUEUE_CALLED',
+        buildSet: async (req, now) => {
+            const settings = await StoreSetting.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId }).lean();
+            return { seatDeadlineAt: new Date(now.getTime() + (Number(settings?.seatGracePeriodMinutes) || 10) * 60_000), manualAction: true };
+        }
     }));
     router.post('/queues/:id/seat', requirePermission('queue.seat'), (req, res) => transition(req, res, {
-        allowedStatuses: ['waiting', 'called'], nextStatus: 'dining', dateField: 'seatedAt', historyAction: 'seated', notificationType: 'QUEUE_UPDATED'
+        allowedStatuses: ['waiting', 'called'], nextStatus: 'dining', dateField: 'seatedAt', historyAction: 'seated', notificationType: 'QUEUE_UPDATED',
+        buildSet: async (req, now) => {
+            const settings = await StoreSetting.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId }).lean();
+            return { diningDeadlineAt: new Date(now.getTime() + (Number(settings?.diningTimeLimitMinutes) || 90) * 60_000), manualAction: true };
+        }
     }));
     router.post('/queues/:id/complete', requirePermission('queue.complete'), (req, res) => transition(req, res, {
         allowedStatuses: ['dining'], nextStatus: 'completed', dateField: 'completedAt', historyAction: 'completed', notificationType: 'QUEUE_COMPLETED'
@@ -68,6 +78,29 @@ function createStoreQueueRoutes(onUpdate = null) {
     router.post('/queues/:id/cancel', requirePermission('queue.cancel'), (req, res) => transition(req, res, {
         allowedStatuses: ['waiting', 'called'], nextStatus: 'cancelled', dateField: 'cancelledAt', historyAction: 'cancelled', notificationType: 'QUEUE_CANCELLED'
     }));
+
+    router.put('/queues/:id/schedule', requirePermission('queue.call'), async (req, res) => {
+        try {
+            if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Invalid queue ID' });
+            const scheduledCallAt = new Date(req.body.scheduledCallAt);
+            const now = new Date();
+            const latestAllowed = new Date(now.getTime() + 7 * 24 * 60 * 60_000);
+            if (!Number.isFinite(scheduledCallAt.getTime()) || scheduledCallAt <= now || scheduledCallAt > latestAllowed) {
+                return res.status(400).json({ error: 'scheduledCallAt must be within the next 7 days' });
+            }
+            const queue = await Queue.findOneAndUpdate(
+                { _id: req.params.id, storeId: req.auth.storeId, branchId: req.auth.branchId, status: 'waiting' },
+                { $set: { scheduledCallAt, manualAction: true } },
+                { new: true, runValidators: true }
+            );
+            if (!queue) return res.status(404).json({ error: 'Waiting queue not found' });
+            if (onUpdate) await onUpdate(req.auth.storeId);
+            res.json(queue);
+        } catch (error) {
+            console.error('Queue scheduling failed:', error);
+            res.status(500).json({ error: 'Unable to schedule queue call' });
+        }
+    });
 
     router.post('/session/reset', requirePermission('session.reset'), async (req, res) => {
         try {
