@@ -195,3 +195,16 @@ npm run migrate:milestone9
 Owners and managers configure automatic calls, arrival grace time, dining time limits, and optional no-show cancellation on `/store/queues`. Staff with `queue.call` permission can schedule an individual waiting queue. Automatic seating and automatic table completion were removed because those physical events require staff confirmation.
 
 The worker checks persisted queue deadlines every five seconds by default. Override this only when required with `QUEUE_AUTOMATION_POLL_MS` (minimum 1000 milliseconds). See `RETAIL_OPERATIONS_PLAN.md` for the reviewed milestone plan and complete time-trigger audit.
+
+## Milestone 10 server-authoritative retail operations
+
+After deploying Milestone 10, run the non-destructive migration once before enabling the new automation controls:
+
+```powershell
+cd server
+npm run migrate:milestone10
+```
+
+This adds the persisted queue-call interval cursor, optional automatic-call hours, optional automatic completion, the dining-deadline index, and the unique LINE event index. Existing queue routes and existing notification logs are preserved.
+
+For Railway, keep the healthcheck path set to `/ping`. Use `/health` for readiness and operations monitoring; its `automation` object reports the worker's last run, last success, next run, and latest error. Railway `SIGTERM` stops the worker, Socket.IO listener, HTTP server, and MongoDB connection gracefully. Persist `ADMIN_TOKEN_SECRET`, `MONGO_URI`, and LINE credentials as Railway variables rather than committing them.

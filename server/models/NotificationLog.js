@@ -8,6 +8,8 @@ const TYPES = [
 const notificationLogSchema = new mongoose.Schema({
     storeId: { type: String, required: true, index: true },
     queueId: { type: mongoose.Schema.Types.ObjectId, ref: 'Queue', default: null, index: true },
+    eventKey: { type: String, default: null, trim: true, maxlength: 300 },
+    payload: { type: mongoose.Schema.Types.Mixed, default: null },
     lineUserId: { type: String, required: true },
     type: { type: String, enum: TYPES, required: true },
     status: { type: String, enum: ['pending', 'sent', 'failed', 'quota_exceeded'], default: 'pending', required: true },
@@ -22,6 +24,10 @@ const notificationLogSchema = new mongoose.Schema({
 notificationLogSchema.index({ storeId: 1, createdAt: -1 });
 notificationLogSchema.index({ storeId: 1, period: 1, status: 1 });
 notificationLogSchema.index({ status: 1, retryCount: 1, createdAt: -1 });
+notificationLogSchema.index(
+    { storeId: 1, eventKey: 1 },
+    { unique: true, partialFilterExpression: { eventKey: { $type: 'string' } } }
+);
 
 module.exports = mongoose.model('NotificationLog', notificationLogSchema);
 module.exports.TYPES = TYPES;

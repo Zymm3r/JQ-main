@@ -8,8 +8,12 @@ const { createSession } = require('./services/queueSessionService');
 const { DEFAULT_STORE_ID } = require('./config');
 const { hashPin } = require('./services/adminAuth');
 const { ensureDefaultBranch } = require('./services/branchService');
+const NotificationLog = require('./models/NotificationLog');
 
 async function initDb() {
+    // Notification idempotency depends on this unique index being ready before
+    // the first worker or request attempts a LINE dispatch.
+    await NotificationLog.createIndexes();
     const storeId = DEFAULT_STORE_ID;
     const store = await Store.findOneAndUpdate(
         { storeId },

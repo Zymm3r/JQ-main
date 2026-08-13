@@ -31,8 +31,9 @@ async function request(baseUrl, path, options = {}) {
 test('Milestone 4 central notifications provide Flex messages, lifecycle logs, retries, unlimited usage and reports', { timeout: 180000 }, async () => {
     const memoryServer = await MongoMemoryServer.create();
     await mongoose.connect(memoryServer.getUri('milestone4-test'));
+    await NotificationLog.createIndexes();
     const sent = [];
-    NotificationService.setTransportForTests(async (lineUserId, message) => { sent.push({ lineUserId, message }); return { ok: true }; });
+    NotificationService.setTransportForTests(async (lineUserId, message, retryKey) => { sent.push({ lineUserId, message, retryKey }); return { ok: true }; });
 
     const app = express(); app.use(express.json());
     app.use('/api/store', notificationRoutes);
@@ -52,6 +53,19 @@ test('Milestone 4 central notifications provide Flex messages, lifecycle logs, r
 
         const reserved = await NotificationService.sendForQueue(queue1, 'QUEUE_RESERVED', { queueAhead: 4 });
         assert.equal(reserved.status, 'sent');
+        const deliveredAfterReservation = sent.length;
+        const duplicateReservation = await NotificationService.sendForQueue(queue1, 'QUEUE_RESERVED', { queueAhead: 4 });
+        assert.equal(duplicateReservation.status, 'skipped');
+        assert.equal(duplicateReservation.reason, 'DUPLICATE_EVENT');
+        assert.equal(sent.length, deliveredAfterReservation);
+        await NotificationLog.collection.updateOne(
+            { _id: reserved.log._id },
+            { $set: { status: 'pending', updatedAt: new Date(Date.now() - 120_000) } }
+        );
+        const recovered = await NotificationService.recoverPendingNotifications(new Date());
+        assert.equal(recovered[0].status, 'sent');
+        assert.equal(sent.length, deliveredAfterReservation + 1);
+        assert.equal(sent[0].retryKey, sent[1].retryKey);
         assert.equal(reserved.message.type, 'flex');
         const flexText = JSON.stringify(reserved.message);
         assert.match(flexText, /Shabu Q/);
@@ -66,7 +80,9 @@ test('Milestone 4 central notifications provide Flex messages, lifecycle logs, r
         assert.doesNotMatch(completedFlex, /ยกเลิกคิว/);
 
         let retryAttempts = 0;
-        NotificationService.setTransportForTests(async () => {
+        const retryKeys = [];
+        NotificationService.setTransportForTests(async (lineUserId, message, retryKey) => {
+            retryKeys.push(retryKey);
             retryAttempts += 1;
             if (retryAttempts === 1) throw Object.assign(new Error('temporary outage'), { statusCode: 503 });
             return { ok: true };
@@ -75,9 +91,12 @@ test('Milestone 4 central notifications provide Flex messages, lifecycle logs, r
         assert.equal(retried.status, 'sent');
         assert.equal(retried.log.retryCount, 1);
         assert.equal(retried.log.errorCode, 'HTTP_503');
+        assert.equal(retryKeys.length, 2);
+        assert.equal(retryKeys[0], retryKeys[1]);
+        assert.match(retryKeys[0], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
 
         NotificationService.setTransportForTests(async () => { throw Object.assign(new Error('bad recipient'), { statusCode: 400, code: 'INVALID_LINE_USER' }); });
-        const permanentFailure = await NotificationService.sendForQueue(queue1, 'QUEUE_UPDATED', { queueAhead: 3 });
+        const permanentFailure = await NotificationService.sendForQueue(queue1, 'QUEUE_UPDATED', { queueAhead: 2 });
         assert.equal(permanentFailure.status, 'failed');
         assert.equal(permanentFailure.log.retryCount, 0);
         assert.equal(permanentFailure.log.errorCode, 'INVALID_LINE_USER');
@@ -85,7 +104,7 @@ test('Milestone 4 central notifications provide Flex messages, lifecycle logs, r
         assert.equal(permanentFailure.log.retryNeeded, false);
 
         NotificationService.setTransportForTests(async () => { throw Object.assign(new Error('LINE unavailable'), { statusCode: 503 }); });
-        const exhaustedRetry = await NotificationService.sendForQueue(queue1, 'QUEUE_UPDATED', { queueAhead: 3 });
+        const exhaustedRetry = await NotificationService.sendForQueue(queue1, 'QUEUE_UPDATED', { queueAhead: 1 });
         assert.equal(exhaustedRetry.status, 'failed');
         assert.equal(exhaustedRetry.log.retryCount, 2);
         assert.equal(exhaustedRetry.retryNeeded, true);

@@ -14,12 +14,13 @@ export default function AdminDashboard() {
     const [tableCount, setTableCount] = useState(10);
     const [storeName, setStoreName] = useState('');
     const [now, setNow] = useState(new Date());
+    const [clockOffset, setClockOffset] = useState(0);
 
     useEffect(() => {
         if (!isAuthenticated) return;
-        const timer = setInterval(() => setNow(new Date()), 1000); // Live timer updates
+        const timer = setInterval(() => setNow(new Date(Date.now() + clockOffset)), 1000); // Display only; server time remains authoritative.
         return () => clearInterval(timer);
-    }, [isAuthenticated]);
+    }, [isAuthenticated, clockOffset]);
 
     const handleLogin = async (e) => {
         e.preventDefault();
@@ -40,7 +41,11 @@ export default function AdminDashboard() {
     };
 
     const fetchQueues = () => {
-        api.get('/queues').then(res => setQueues(res.data));
+        api.get('/queues').then(res => {
+            setQueues(res.data);
+            const serverTime = res.headers?.['x-server-time'];
+            if (serverTime) setClockOffset(new Date(serverTime).getTime() - Date.now());
+        });
     };
 
     const fetchStats = () => {
@@ -60,8 +65,9 @@ export default function AdminDashboard() {
             if (error.response?.status === 401) handleLogout();
         });
 
-        const handleUpdate = (updatedQueues) => {
+        const handleUpdate = (updatedQueues, metadata = {}) => {
             setQueues(updatedQueues);
+            if (metadata.serverTime) setClockOffset(new Date(metadata.serverTime).getTime() - Date.now());
             fetchStats();
         };
 

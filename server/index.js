@@ -9,15 +9,17 @@ const mongoose = require('mongoose');
 
 const Queue = require('./models/Queue');
 const Setting = require('./models/Setting');
-const Counter = require('./models/Counter');
 const Store = require('./models/Store');
 const StoreSetting = require('./models/StoreSetting');
 const { getActiveSession, resetSession } = require('./services/queueSessionService');
+const { reserve: reserveQueue } = require('./services/queueService');
 const { initDb } = require('./database');
 const { DEFAULT_STORE_ID, normalizeStoreId } = require('./config');
 const { getSetting, setSetting } = require('./services/settingsService');
 const { loginAdmin, requireAdmin } = require('./services/adminAuth');
 const { verifyAccountToken } = require('./services/accountAuth');
+const Branch = require('./models/Branch');
+const { startAutomation, stopAutomation, getAutomationHealth } = require('./services/queueAutomation');
 const authRoutes = require('./routes/authRoutes');
 const merchantRoutes = require('./routes/merchantRoutes');
 const platformRoutes = require('./routes/platformRoutes');
@@ -36,6 +38,9 @@ const app = express();
 const server = http.createServer(app);
 let databaseReady = mongoose.connection.readyState === 1;
 let databaseConnectionPromise = null;
+let databaseRetryTimer = null;
+let databaseRetryAttempt = 0;
+let shuttingDown = false;
 let automationStarted = false;
 const io = new Server(server, {
     cors: {
@@ -58,7 +63,8 @@ app.get('/health', (req, res) => {
     res.status(databaseReady ? 200 : 503).json({
         status: databaseReady ? 'ready' : 'starting',
         database: databaseReady ? 'connected' : 'disconnected',
-        lineWebhook: lineWebhookEnabled ? 'enabled' : 'disabled'
+        lineWebhook: lineWebhookEnabled ? 'enabled' : 'disabled',
+        automation: getAutomationHealth()
     });
 });
 
@@ -154,15 +160,16 @@ async function getCurrentSessionId(storeId) {
 }
 
 // Helper: Broadcast update
-async function getQueuesData(storeId) {
-    const sessionId = await getCurrentSessionId(storeId);
-    const queues = await Queue.find({ storeId, branchId: 'default', sessionId, status: { $in: ['waiting', 'called', 'dining'] } }).sort({ queueNumber: 1 }).lean();
+async function getQueuesData(storeId, branchId = 'default') {
+    const sessionId = (await getActiveSession(storeId, branchId)).sessionId;
+    const queues = await Queue.find({ storeId, branchId, sessionId, status: { $in: ['waiting', 'called', 'dining'] } }).sort({ queueNumber: 1 }).lean();
     queues.forEach(queue => {
         queue.id = queue.queueNumber;
     });
 
-    const avgTime = Number.parseFloat(await getSetting(storeId, 'avg_time', '30')) || 30;
-    const tableCount = Math.max(1, Number.parseInt(await getSetting(storeId, 'table_count', '10'), 10) || 10);
+    const typedSettings = await StoreSetting.findOne({ storeId, branchId }).lean();
+    const avgTime = Number(typedSettings?.averageTableTime) || Number.parseFloat(await getSetting(storeId, 'avg_time', '30')) || 30;
+    const tableCount = Math.max(1, Number(typedSettings?.totalTables) || Number.parseInt(await getSetting(storeId, 'table_count', '10'), 10) || 10);
     const timePerTable = avgTime / tableCount;
     let waitingCount = 0;
     return queues.map(queue => {
@@ -173,13 +180,18 @@ async function getQueuesData(storeId) {
     });
 }
 
-async function broadcastUpdate(storeId = DEFAULT_STORE_ID) {
+async function broadcastUpdate(storeId = DEFAULT_STORE_ID, branchId = 'default') {
     // Return only active queues (waiting, called, dining)
     try {
-        io.to(`store:${storeId}`).emit('queue_updated', await getQueuesData(storeId));
+        const queues = await getQueuesData(storeId, branchId);
+        const metadata = { storeId, branchId, serverTime: new Date().toISOString() };
+        io.to(`store:${storeId}:branch:${branchId}`).emit('queue_updated', queues, metadata);
+        if (branchId === 'default') io.to(`store:${storeId}`).emit('queue_updated', queues, metadata);
     } catch (e) {
         if (e.message === 'NO_ACTIVE_SESSION') {
-            io.to(`store:${storeId}`).emit('queue_updated', []);
+            const metadata = { storeId, branchId, serverTime: new Date().toISOString() };
+            io.to(`store:${storeId}:branch:${branchId}`).emit('queue_updated', [], metadata);
+            if (branchId === 'default') io.to(`store:${storeId}`).emit('queue_updated', [], metadata);
         } else {
             console.error('Broadcast update error:', e);
         }
@@ -195,6 +207,7 @@ app.get('/api/store', requireActivePublicStore, async (req, res) => {
 // Get active queues
 app.get('/api/queues', requireActivePublicStore, async (req, res) => {
     try {
+        res.set('X-Server-Time', new Date().toISOString());
         res.json(await getQueuesData(req.storeId));
     } catch (e) {
         res.json([]);
@@ -246,59 +259,40 @@ app.post('/api/reserve', requireActivePublicStore, async (req, res) => {
     if (!name) return res.status(400).json({ error: 'Name is required' });
 
     try {
-        let sessionId;
-        try {
-            sessionId = await getCurrentSessionId(req.storeId);
-        } catch (e) {
-            return res.status(400).json({ error: 'No active session available. Please contact admin.' });
-        }
-
-        // Check if Line ID already has active queue
-        if (lineId) {
-            const existing = await Queue.findOne({ storeId: req.storeId, branchId: 'default', sessionId, lineUserId: lineId, status: { $in: ['waiting', 'called', 'dining'] } }).lean();
-            if (existing) {
-                const displayId = existing.queueNumber !== undefined ? existing.queueNumber : existing._id.toString();
-                return res.status(409).json({ error: 'คุณมีคิวอยู่แล้ว (You already have a queue)', queueId: displayId });
-            }
-        }
-
-        // Atomic queue number increment
-        const counter = await Counter.findOneAndUpdate(
-            { storeId: req.storeId, branchId: 'default', sessionId },
-            { $inc: { seq: 1 } },
-            { new: true, upsert: true }
-        );
-
         const cancelToken = crypto.randomBytes(32).toString('base64url');
-        const typedSettings = await StoreSetting.findOne({ storeId: req.storeId, branchId: 'default' }).lean();
-        const newQueue = await Queue.create({
-            storeId: req.storeId,
-            branchId: 'default',
-            sessionId,
-            queueNumber: counter.seq,
+        const newQueue = await reserveQueue(req.storeId, {
             customerName: name,
             lineUserId: lineId || null,
             cancelTokenHash: crypto.createHash('sha256').update(cancelToken).digest('hex'),
             phoneNumber: phone || null,
-            pax: pax || 1,
-            time_slot: timeSlot || null,
-            status: 'waiting',
-            scheduledCallAt: typedSettings?.autoCallEnabled
-                ? new Date(Date.now() + (Number(typedSettings.autoCallDelayMinutes) || 15) * 60_000)
-                : null,
-            history: [{ action: 'reserved' }]
-        });
+            pax: Number(pax) || 1,
+            timeSlot: timeSlot || null,
+            source: 'legacy'
+        }, 'default');
 
-        await NotificationService.sendForQueue(newQueue, 'QUEUE_RESERVED', {
-            queueAhead: Math.max(0, counter.seq - 1),
-            estimatedWaitTime: newQueue.estimatedWaitTime
-        });
-
-        broadcastUpdate(req.storeId);
+        if (!newQueue.$wasIdempotentReplay) {
+            await NotificationService.sendForQueue(newQueue, 'QUEUE_RESERVED', {
+                queueAhead: newQueue.lastNotifiedQueueAhead,
+                estimatedWaitTime: newQueue.estimatedWaitTime
+            });
+            broadcastUpdate(req.storeId);
+        }
         const outputId = newQueue.queueNumber !== undefined ? newQueue.queueNumber : newQueue._id.toString();
         res.json({ success: true, id: outputId, queueNumber: newQueue.queueNumber, cancelToken });
     } catch (err) {
         console.error('Error in /api/reserve:', err);
+        if (err.message === 'NO_ACTIVE_SESSION') return res.status(400).json({ error: 'No active session available. Please contact admin.' });
+        if (err.message === 'ACTIVE_QUEUE_EXISTS') {
+            const existing = await Queue.findOne({
+                storeId: req.storeId, branchId: 'default', lineUserId: lineId,
+                status: { $in: ['waiting', 'called', 'dining'] }
+            }).sort({ createdAt: -1 }).lean().catch(() => null);
+            return res.status(409).json({
+                error: 'คุณมีคิวอยู่แล้ว (You already have a queue)',
+                queueId: existing?.queueNumber ?? null
+            });
+        }
+        if (['QUEUE_CLOSED', 'QUEUE_FULL'].includes(err.message)) return res.status(409).json({ error: err.message });
         if (err.code === 11000) return res.status(409).json({ error: 'Queue conflict (duplicate key)' });
         res.status(500).json({ error: 'Internal Server Error', details: err.message });
     }
@@ -413,6 +407,10 @@ app.post('/api/admin/call', async (req, res) => {
 
         if (!queue) return res.status(404).json({ error: 'Queue not found or not waiting' });
 
+        await StoreSetting.updateOne(
+            { storeId: req.storeId, branchId: 'default' },
+            { $set: { lastAutoCallAt: now } }
+        );
         await NotificationService.sendForQueue(queue, 'QUEUE_CALLED');
         await NotificationService.syncQueuePositions(req.storeId);
 
@@ -584,24 +582,35 @@ app.get(/.*/, (req, res) => {
 
 // Socket Connection
 io.on('connection', async (socket) => {
+    let storeId = DEFAULT_STORE_ID;
+    let branchId = 'default';
     try {
-        let storeId = DEFAULT_STORE_ID;
         const token = socket.handshake.auth?.token;
         if (token) {
             const claims = verifyAccountToken(token);
             if (!claims.storeId) throw new Error('STORE_TOKEN_REQUIRED');
             storeId = normalizeStoreId(claims.storeId);
+            branchId = String(socket.handshake.auth?.branchId || 'default').trim();
+            const branch = await Branch.findOne({ storeId, branchId, isActive: true }).lean();
+            if (!branch) throw new Error('BRANCH_NOT_FOUND');
         }
-        socket.join(`store:${storeId}`);
+        socket.join(`store:${storeId}:branch:${branchId}`);
+        // Preserve the room used by the legacy default-store screens.
+        if (!token && branchId === 'default') socket.join(`store:${storeId}`);
         socket.data.storeId = storeId;
-        socket.emit('queue_updated', await getQueuesData(storeId));
+        socket.data.branchId = branchId;
+        socket.emit('queue_updated', await getQueuesData(storeId, branchId), {
+            storeId,
+            branchId,
+            serverTime: new Date().toISOString()
+        });
     } catch (error) {
-        socket.emit('queue_updated', []);
+        socket.emit('queue_updated', [], { storeId, branchId, serverTime: new Date().toISOString() });
+        if (error.message === 'NO_ACTIVE_SESSION') return;
+        socket.disconnect(true);
         console.error('Socket init error:', error);
     }
 });
-
-const { startAutomation } = require('./services/queueAutomation');
 
 function startAutomationOnce() {
     if (!automationStarted && databaseReady && server.listening) {
@@ -620,7 +629,19 @@ async function connectDatabase() {
     await mongoose.connect(process.env.MONGO_URI, { serverSelectionTimeoutMS: 10000 });
     await initDb();
     databaseReady = true;
+    databaseRetryAttempt = 0;
     startAutomationOnce();
+}
+
+function scheduleDatabaseReconnect() {
+    if (shuttingDown || databaseReady || databaseRetryTimer || !server.listening) return;
+    const delay = Math.min(30_000, 2_000 * (2 ** databaseRetryAttempt));
+    databaseRetryAttempt += 1;
+    databaseRetryTimer = setTimeout(() => {
+        databaseRetryTimer = null;
+        ensureDatabase().catch(() => scheduleDatabaseReconnect());
+    }, delay);
+    databaseRetryTimer.unref?.();
 }
 
 function ensureDatabase() {
@@ -629,6 +650,7 @@ function ensureDatabase() {
         databaseConnectionPromise = connectDatabase()
             .catch(error => {
                 databaseReady = false;
+                scheduleDatabaseReconnect();
                 throw error;
             })
             .finally(() => {
@@ -640,6 +662,7 @@ function ensureDatabase() {
 
 mongoose.connection.on('disconnected', () => {
     databaseReady = false;
+    scheduleDatabaseReconnect();
 });
 
 function start() {
@@ -649,6 +672,7 @@ function start() {
     server.listen(port, () => {
         console.log(`Server running on port ${port}`);
         startAutomationOnce();
+        scheduleDatabaseReconnect();
     });
     ensureDatabase().catch(() => {
         console.error('Initial database connection failed; API requests will retry.');
@@ -656,8 +680,33 @@ function start() {
     return server;
 }
 
+let shutdownPromise = null;
+function shutdown(signal = 'shutdown') {
+    if (shutdownPromise) return shutdownPromise;
+    shutdownPromise = (async () => {
+        shuttingDown = true;
+        console.log(`Received ${signal}; stopping queue automation and network listeners.`);
+        stopAutomation();
+        if (databaseRetryTimer) clearTimeout(databaseRetryTimer);
+        databaseRetryTimer = null;
+        await new Promise(resolve => io.close(() => resolve()));
+        if (server.listening) await new Promise(resolve => server.close(() => resolve()));
+        if (mongoose.connection.readyState !== 0) await mongoose.disconnect();
+        databaseReady = false;
+    })();
+    return shutdownPromise;
+}
+
 if (require.main === module) {
     start();
+    process.once('SIGTERM', () => shutdown('SIGTERM').catch(error => {
+        console.error('Graceful shutdown failed:', error);
+        process.exitCode = 1;
+    }));
+    process.once('SIGINT', () => shutdown('SIGINT').catch(error => {
+        console.error('Graceful shutdown failed:', error);
+        process.exitCode = 1;
+    }));
 } else {
     // Serverless runtimes import the Express app instead of calling start().
     ensureDatabase().catch(() => {
@@ -671,3 +720,5 @@ module.exports.app = app;
 module.exports.server = server;
 module.exports.start = start;
 module.exports.ensureDatabase = ensureDatabase;
+module.exports.shutdown = shutdown;
+module.exports.broadcastUpdate = broadcastUpdate;

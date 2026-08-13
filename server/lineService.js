@@ -9,7 +9,11 @@ const config = {
 const client = process.env.LINE_CHANNEL_ACCESS_TOKEN
     ? new line.Client(config)
     : null;
+const messagingClient = process.env.LINE_CHANNEL_ACCESS_TOKEN
+    ? new line.messagingApi.MessagingApiClient({ channelAccessToken: config.channelAccessToken })
+    : null;
 
 module.exports = {
-    client
+    client,
+    messagingClient
 };

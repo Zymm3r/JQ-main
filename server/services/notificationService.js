@@ -4,9 +4,11 @@ const Queue = require('../models/Queue');
 const Store = require('../models/Store');
 const StoreSetting = require('../models/StoreSetting');
 const QueueSession = require('../models/QueueSession');
+const crypto = require('crypto');
 
 const NOTIFICATION_POLICY = Object.freeze({ unlimited: true, limit: null });
 const RETRYABLE_STATUS_CODES = new Set([408, 409, 429, 500, 502, 503, 504]);
+const PENDING_RECOVERY_MS = Math.max(10_000, Number(process.env.LINE_PENDING_RECOVERY_MS) || 60_000);
 const MESSAGE_TEXT = {
     QUEUE_RESERVED: 'รับคิวเรียบร้อยแล้ว',
     QUEUE_UPDATED: 'อัปเดตลำดับคิวของคุณแล้ว',
@@ -20,11 +22,19 @@ const STATUS_TEXT = {
     waiting: 'รอคิว', called: 'เรียกคิวแล้ว', dining: 'กำลังใช้บริการ', completed: 'เสร็จสิ้น', cancelled: 'ยกเลิกแล้ว', closed: 'ร้านปิดรับคิว'
 };
 
-let transport = async (lineUserId, message) => {
-    const { client } = require('../lineService');
-    if (!client) return { mock: true };
-    return client.pushMessage(lineUserId, message);
+let transport = async (lineUserId, message, retryKey) => {
+    const { messagingClient } = require('../lineService');
+    if (!messagingClient) return { mock: true };
+    return messagingClient.pushMessage({ to: lineUserId, messages: [message] }, retryKey);
 };
+
+function lineRetryKey(value) {
+    const bytes = crypto.createHash('sha256').update(String(value)).digest().subarray(0, 16);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = bytes.toString('hex');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 
 function periodFor(date = new Date()) {
     return date.toISOString().slice(0, 7);
@@ -102,20 +112,48 @@ function buildFlexMessage(store, type, data, sentAt = new Date()) {
     };
 }
 
-async function send({ storeId, queueId = null, lineUserId, type, data = {} }) {
+async function send({ storeId, queueId = null, lineUserId, type, eventKey = null, data = {} }) {
     if (!NotificationLog.TYPES.includes(type)) throw new Error('INVALID_NOTIFICATION_TYPE');
     if (!lineUserId) return { status: 'skipped', reason: 'NO_LINE_USER' };
-    const store = await Store.findOne({ storeId }).lean();
-    if (!store) throw new Error('STORE_NOT_FOUND');
     const period = periodFor();
-    const quota = await consumeQuota(store, period);
-    const log = await NotificationLog.create({ storeId, queueId, lineUserId, type, period, status: 'pending', errorCode: null });
+    let log;
+    let recoveredPending = false;
+    try {
+        log = await NotificationLog.create({ storeId, queueId, lineUserId, type, eventKey, payload: data, period, status: 'pending', errorCode: null });
+    } catch (error) {
+        if (error.code === 11000 && eventKey) {
+            const existing = await NotificationLog.findOne({ storeId, eventKey });
+            const recoveryThreshold = new Date(Date.now() - PENDING_RECOVERY_MS);
+            if (existing?.status === 'pending' && existing.updatedAt <= recoveryThreshold) {
+                log = await NotificationLog.findOneAndUpdate(
+                    { _id: existing._id, status: 'pending', updatedAt: existing.updatedAt },
+                    { $set: { errorCode: 'RECOVERING' } },
+                    { new: true }
+                );
+                recoveredPending = Boolean(log);
+            }
+            if (!recoveredPending) return { status: 'skipped', reason: 'DUPLICATE_EVENT', log: existing };
+        } else {
+            throw error;
+        }
+    }
+    const store = await Store.findOne({ storeId }).lean();
+    if (!store) {
+        log.status = 'failed';
+        log.errorCode = 'STORE_NOT_FOUND';
+        await log.save();
+        throw new Error('STORE_NOT_FOUND');
+    }
+    const quota = recoveredPending
+        ? { usage: await NotificationUsage.findOne({ storeId, period }), limit: null }
+        : await consumeQuota(store, period);
 
     const message = buildFlexMessage(store, type, data);
+    const retryKey = lineRetryKey(eventKey || log._id);
     let lastErrorCode = null;
     for (let attempt = 0; attempt <= 2; attempt += 1) {
         try {
-            await transport(lineUserId, message);
+            await transport(lineUserId, message, retryKey);
             log.status = 'sent';
             log.sentAt = new Date();
             log.retryCount = attempt;
@@ -150,12 +188,34 @@ function queueNotificationData(queue, extra = {}) {
     };
 }
 
+function notificationEventKey(queue, type, extra = {}) {
+    const anchors = {
+        QUEUE_RESERVED: queue.createdAt,
+        QUEUE_CALLED: queue.calledAt,
+        QUEUE_CANCELLED: queue.cancelledAt,
+        QUEUE_COMPLETED: queue.completedAt,
+        STORE_CLOSED: queue.sessionId
+    };
+    let anchor = anchors[type];
+    if (type === 'QUEUE_NEAR') anchor = 'near';
+    if (type === 'QUEUE_UPDATED') {
+        anchor = queue.status === 'dining' && queue.seatedAt
+            ? `seated:${new Date(queue.seatedAt).toISOString()}`
+            : `ahead:${Number.isFinite(extra.queueAhead) ? extra.queueAhead : 'unknown'}`;
+    }
+    if (anchor instanceof Date) anchor = anchor.toISOString();
+    if (!anchor) anchor = queue.updatedAt || queue.createdAt || queue.status;
+    if (anchor instanceof Date) anchor = anchor.toISOString();
+    return `${queue._id}:${type}:${anchor}`.slice(0, 300);
+}
+
 async function sendForQueue(queue, type, extra = {}) {
     return send({
         storeId: queue.storeId,
         queueId: queue._id,
         lineUserId: queue.lineUserId,
         type,
+        eventKey: notificationEventKey(queue, type, extra),
         data: queueNotificationData(queue, extra)
     });
 }
@@ -193,6 +253,32 @@ async function notifyStoreClosed(storeId, branchId = 'default') {
     return Promise.all(queues.map(queue => sendForQueue(queue, 'STORE_CLOSED', { status: 'closed', cancellationPossible: true })));
 }
 
+async function recoverPendingNotifications(now = new Date(), limit = 20) {
+    const threshold = new Date(now.getTime() - PENDING_RECOVERY_MS);
+    const logs = await NotificationLog.find({
+        status: 'pending',
+        eventKey: { $type: 'string' },
+        queueId: { $ne: null },
+        updatedAt: { $lte: threshold }
+    }).sort({ updatedAt: 1 }).limit(limit).lean();
+    const results = [];
+    for (const log of logs) {
+        try {
+            results.push(await send({
+                storeId: log.storeId,
+                queueId: log.queueId,
+                lineUserId: log.lineUserId,
+                type: log.type,
+                eventKey: log.eventKey,
+                data: log.payload || {}
+            }));
+        } catch (error) {
+            console.error(`[Notification] pending recovery failed for ${log._id}:`, error.message);
+        }
+    }
+    return results;
+}
+
 async function getUsage(storeId, date = new Date()) {
     const store = await Store.findOne({ storeId }).lean();
     if (!store) throw new Error('STORE_NOT_FOUND');
@@ -212,14 +298,14 @@ async function getUsage(storeId, date = new Date()) {
 
 function setTransportForTests(value) { transport = value; }
 function resetTransportForTests() {
-    transport = async (lineUserId, message) => {
-        const { client } = require('../lineService');
-        if (!client) return { mock: true };
-        return client.pushMessage(lineUserId, message);
+    transport = async (lineUserId, message, retryKey) => {
+        const { messagingClient } = require('../lineService');
+        if (!messagingClient) return { mock: true };
+        return messagingClient.pushMessage({ to: lineUserId, messages: [message] }, retryKey);
     };
 }
 
 module.exports = {
-    NOTIFICATION_POLICY, periodFor, quotaForStore, buildFlexMessage, send, sendForQueue,
-    syncQueuePositions, notifyStoreClosed, getUsage, setTransportForTests, resetTransportForTests
+    NOTIFICATION_POLICY, periodFor, quotaForStore, buildFlexMessage, notificationEventKey, lineRetryKey, send, sendForQueue,
+    syncQueuePositions, notifyStoreClosed, recoverPendingNotifications, getUsage, setTransportForTests, resetTransportForTests
 };

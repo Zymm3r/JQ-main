@@ -97,6 +97,7 @@ queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, queueNumbe
 queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, status: 1, createdAt: 1, manualAction: 1 });
 queueSchema.index({ storeId: 1, branchId: 1, status: 1, scheduledCallAt: 1, queueNumber: 1 });
 queueSchema.index({ storeId: 1, branchId: 1, status: 1, seatDeadlineAt: 1 });
+queueSchema.index({ storeId: 1, branchId: 1, status: 1, diningDeadlineAt: 1 });
 queueSchema.index({ storeId: 1, branchId: 1, sessionId: 1, queueNumber: 1 }, { unique: true });
 queueSchema.index({ storeId: 1, publicToken: 1 }, { unique: true });
 queueSchema.index(

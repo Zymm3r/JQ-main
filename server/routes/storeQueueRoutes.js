@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const Queue = require('../models/Queue');
+const QueueSession = require('../models/QueueSession');
 const { requireAccount, requireVerifiedAccount } = require('../services/accountAuth');
 const { refreshSubscriptionState } = require('../services/subscriptionService');
 const { listActiveQueues } = require('../services/queueService');
@@ -26,6 +27,7 @@ function createStoreQueueRoutes(onUpdate = null) {
 
     router.get('/queues', async (req, res) => {
         try {
+            res.set('X-Server-Time', new Date().toISOString());
             res.json(await listActiveQueues(req.auth.storeId, req.auth.branchId));
         } catch (error) {
             if (error.message === 'NO_ACTIVE_SESSION') return res.status(409).json({ error: error.message });
@@ -48,9 +50,15 @@ function createStoreQueueRoutes(onUpdate = null) {
                 { new: true }
             );
             if (!queue) return res.status(404).json({ error: 'Queue not found or transition is not allowed' });
+            if (config.recordCallAt) {
+                await StoreSetting.updateOne(
+                    { storeId: req.auth.storeId, branchId: req.auth.branchId },
+                    { $set: { lastAutoCallAt: now } }
+                );
+            }
             await NotificationService.sendForQueue(queue, config.notificationType);
             await NotificationService.syncQueuePositions(req.auth.storeId, req.auth.branchId);
-            if (onUpdate) await onUpdate(req.auth.storeId);
+            if (onUpdate) await onUpdate(req.auth.storeId, req.auth.branchId);
             res.json(queue);
         } catch (error) {
             console.error('Queue transition failed:', error);
@@ -58,8 +66,51 @@ function createStoreQueueRoutes(onUpdate = null) {
         }
     }
 
+    router.post('/queues/call-next', requirePermission('queue.call'), async (req, res) => {
+        try {
+            const session = await QueueSession.findOne({
+                storeId: req.auth.storeId,
+                branchId: req.auth.branchId,
+                status: 'active'
+            }).lean();
+            if (!session) return res.status(409).json({ error: 'NO_ACTIVE_SESSION' });
+            const settings = await StoreSetting.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId }).lean();
+            const now = new Date();
+            const queue = await Queue.findOneAndUpdate(
+                {
+                    storeId: req.auth.storeId,
+                    branchId: req.auth.branchId,
+                    sessionId: session.sessionId,
+                    status: 'waiting'
+                },
+                {
+                    $set: {
+                        status: 'called',
+                        calledAt: now,
+                        seatDeadlineAt: new Date(now.getTime() + (Number(settings?.seatGracePeriodMinutes) || 10) * 60_000),
+                        manualAction: true
+                    },
+                    $push: { history: { action: 'called', timestamp: now } }
+                },
+                { new: true, sort: { queueNumber: 1 } }
+            );
+            if (!queue) return res.status(404).json({ error: 'No waiting queue' });
+            await StoreSetting.updateOne(
+                { storeId: req.auth.storeId, branchId: req.auth.branchId },
+                { $set: { lastAutoCallAt: now } }
+            );
+            await NotificationService.sendForQueue(queue, 'QUEUE_CALLED');
+            await NotificationService.syncQueuePositions(req.auth.storeId, req.auth.branchId);
+            if (onUpdate) await onUpdate(req.auth.storeId, req.auth.branchId);
+            res.json(queue);
+        } catch (error) {
+            console.error('Call next failed:', error);
+            res.status(500).json({ error: 'Unable to call next queue' });
+        }
+    });
+
     router.post('/queues/:id/call', requirePermission('queue.call'), (req, res) => transition(req, res, {
-        allowedStatuses: ['waiting'], nextStatus: 'called', dateField: 'calledAt', historyAction: 'called', notificationType: 'QUEUE_CALLED',
+        allowedStatuses: ['waiting'], nextStatus: 'called', dateField: 'calledAt', historyAction: 'called', notificationType: 'QUEUE_CALLED', recordCallAt: true,
         buildSet: async (req, now) => {
             const settings = await StoreSetting.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId }).lean();
             return { seatDeadlineAt: new Date(now.getTime() + (Number(settings?.seatGracePeriodMinutes) || 10) * 60_000), manualAction: true };
@@ -94,7 +145,11 @@ function createStoreQueueRoutes(onUpdate = null) {
                 { new: true, runValidators: true }
             );
             if (!queue) return res.status(404).json({ error: 'Waiting queue not found' });
-            if (onUpdate) await onUpdate(req.auth.storeId);
+            await StoreSetting.updateOne(
+                { storeId: req.auth.storeId, branchId: req.auth.branchId },
+                { $max: { nextAutoCallAt: scheduledCallAt } }
+            );
+            if (onUpdate) await onUpdate(req.auth.storeId, req.auth.branchId);
             res.json(queue);
         } catch (error) {
             console.error('Queue scheduling failed:', error);
@@ -106,7 +161,7 @@ function createStoreQueueRoutes(onUpdate = null) {
         try {
             await NotificationService.notifyStoreClosed(req.auth.storeId, req.auth.branchId);
             const session = await resetSession(req.auth.storeId, req.account._id, req.auth.branchId);
-            if (onUpdate) await onUpdate(req.auth.storeId);
+            if (onUpdate) await onUpdate(req.auth.storeId, req.auth.branchId);
             res.status(201).json({ sessionId: session.sessionId, status: session.status, startedAt: session.startedAt });
         } catch (error) {
             console.error('Session reset failed:', error);

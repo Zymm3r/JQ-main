@@ -99,7 +99,7 @@ function createPublicQueueRoutes(onUpdate = null) {
                     estimatedWaitTime: queue.estimatedWaitTime
                 });
                 if (sourceRecord) await QrSource.updateOne({ _id: sourceRecord._id }, { $inc: { reservationCount: 1 } });
-                if (onUpdate) await onUpdate(req.publicStore.storeId);
+                if (onUpdate) await onUpdate(req.publicStore.storeId, req.publicBranch.branchId);
             }
 
             const appBaseUrl = String(process.env.APP_BASE_URL || 'http://localhost:5173').replace(/\/$/, '');
@@ -143,7 +143,7 @@ function createPublicQueueRoutes(onUpdate = null) {
         if (!queue) return res.status(404).json({ error: 'Queue not found or cannot be cancelled' });
         await NotificationService.sendForQueue(queue, 'QUEUE_CANCELLED');
         await NotificationService.syncQueuePositions(req.publicStore.storeId, req.publicBranch.branchId);
-        if (onUpdate) await onUpdate(req.publicStore.storeId);
+        if (onUpdate) await onUpdate(req.publicStore.storeId, req.publicBranch.branchId);
         res.json(publicQueue(queue));
     });
 

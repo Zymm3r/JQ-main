@@ -25,3 +25,16 @@ api.interceptors.request.use(config => {
 });
 
 export const socket = io(API_URL, { auth: { storeId: STORE_ID } });
+
+export function createMerchantSocket() {
+    return io(API_URL, {
+        autoConnect: false,
+        auth: {
+            token: localStorage.getItem('account_token'),
+            branchId: localStorage.getItem('active_branch_id') || 'default'
+        },
+        reconnection: true,
+        reconnectionDelay: 1_000,
+        reconnectionDelayMax: 5_000
+    });
+}

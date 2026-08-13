@@ -3,6 +3,7 @@ const Queue = require('../models/Queue');
 const Counter = require('../models/Counter');
 const StoreSetting = require('../models/StoreSetting');
 const { getActiveSession } = require('./queueSessionService');
+const { allocateScheduledCallAt } = require('./queueTimingService');
 
 const ACTIVE_STATUSES = ['waiting', 'called', 'dining'];
 
@@ -80,8 +81,9 @@ async function reserve(storeId, input, branchId = 'default') {
         { upsert: true, new: true, setDefaultsOnInsert: true }
     );
     const estimatedWaitTime = Math.ceil(((activeCount + 1) / settings.totalTables) * settings.averageTableTime);
+    const scheduledCallAt = await allocateScheduledCallAt(storeId, branchId, settings, new Date());
     try {
-        return await Queue.create({
+        const queue = await Queue.create({
             storeId,
             branchId,
             sessionId: session.sessionId,
@@ -91,18 +93,18 @@ async function reserve(storeId, input, branchId = 'default') {
             idempotencyKey,
             customerName: input.customerName,
             lineUserId: input.lineUserId || null,
+            cancelTokenHash: input.cancelTokenHash || null,
             phoneNumber: input.phoneNumber || null,
             time_slot: input.timeSlot || null,
             pax: input.pax,
             status: 'waiting',
             estimatedWaitTime,
-            scheduledCallAt: settings.autoCallEnabled
-                ? new Date(Date.now() + (Number(settings.autoCallDelayMinutes) || 15) * 60_000)
-                : null,
+            scheduledCallAt,
             lastNotifiedQueueAhead: activeCount,
             nearNotificationSentAt: activeCount <= 2 ? new Date() : null,
             history: [{ action: 'reserved' }]
         });
+        return queue;
     } catch (error) {
         if (error.code === 11000 && idempotencyKey) {
             const duplicate = await Queue.findOne({ storeId, branchId, sessionId: session.sessionId, idempotencyKey });

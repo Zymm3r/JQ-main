@@ -7,6 +7,21 @@ const { requireAccount, requireVerifiedAccount } = require('../services/accountA
 const NotificationService = require('../services/notificationService');
 const { requirePermission } = require('../services/memberPermissions');
 const { requireBranch } = require('../services/branchService');
+const { TIME_PATTERN, scheduleUnassignedQueues } = require('../services/queueTimingService');
+
+function settingsResponse(settings) {
+    const value = settings?.toObject ? settings.toObject() : settings;
+    return {
+        ...value,
+        autoCallIntervalMinutes: value.autoCallIntervalMinutes ?? 5,
+        autoCallScheduleEnabled: value.autoCallScheduleEnabled ?? false,
+        autoCallScheduleStart: value.autoCallScheduleStart || '10:00',
+        autoCallScheduleEnd: value.autoCallScheduleEnd || '22:00',
+        autoCompleteEnabled: value.autoCompleteEnabled ?? false,
+        calledQueueResponseLimitMinutes: value.seatGracePeriodMinutes,
+        serverTime: new Date().toISOString()
+    };
+}
 
 const router = express.Router();
 router.use((req, res, next) => req.path === '/' ? next('router') : next());
@@ -37,17 +52,26 @@ router.get('/notifications/logs', async (req, res) => {
 router.get('/settings', async (req, res) => {
     const settings = await StoreSetting.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId }).lean();
     if (!settings) return res.status(404).json({ error: 'Store settings not found' });
-    res.json({ ...settings, serverTime: new Date().toISOString() });
+    res.json(settingsResponse(settings));
 });
 
 router.put('/settings', requirePermission('settings.update'), async (req, res) => {
     const current = await StoreSetting.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId });
     if (!current) return res.status(404).json({ error: 'Store settings not found' });
     const wasOpen = current.queueOpen;
+    const previousAutomationTiming = JSON.stringify({
+        autoCallEnabled: current.autoCallEnabled,
+        autoCallDelayMinutes: current.autoCallDelayMinutes,
+        autoCallIntervalMinutes: current.autoCallIntervalMinutes,
+        autoCallScheduleEnabled: current.autoCallScheduleEnabled,
+        autoCallScheduleStart: current.autoCallScheduleStart,
+        autoCallScheduleEnd: current.autoCallScheduleEnd
+    });
     const numeric = [
         ['averageTableTime', 1, 1440], ['averageWaitTime', 0, 1440],
         ['totalTables', 1, 10000], ['maxQueueSize', 1, 100000],
-        ['autoCallDelayMinutes', 1, 1440], ['seatGracePeriodMinutes', 1, 1440],
+        ['autoCallDelayMinutes', 1, 1440], ['autoCallIntervalMinutes', 1, 1440],
+        ['seatGracePeriodMinutes', 1, 1440],
         ['diningTimeLimitMinutes', 1, 1440]
     ];
     for (const [key, min, max] of numeric) {
@@ -57,32 +81,63 @@ router.put('/settings', requirePermission('settings.update'), async (req, res) =
             current[key] = value;
         }
     }
+    if (req.body.calledQueueResponseLimitMinutes !== undefined) {
+        const value = Number(req.body.calledQueueResponseLimitMinutes);
+        if (!Number.isFinite(value) || value < 1 || value > 1440) return res.status(400).json({ error: 'calledQueueResponseLimitMinutes is invalid' });
+        current.seatGracePeriodMinutes = value;
+    }
     if (req.body.autoCallEnabled !== undefined) current.autoCallEnabled = req.body.autoCallEnabled === true;
+    if (req.body.autoCallScheduleEnabled !== undefined) current.autoCallScheduleEnabled = req.body.autoCallScheduleEnabled === true;
     if (req.body.autoCancelNoShowEnabled !== undefined) current.autoCancelNoShowEnabled = req.body.autoCancelNoShowEnabled === true;
+    if (req.body.autoCompleteEnabled !== undefined) current.autoCompleteEnabled = req.body.autoCompleteEnabled === true;
     if (req.body.queueOpen !== undefined) current.queueOpen = req.body.queueOpen === true;
+    for (const key of ['autoCallScheduleStart', 'autoCallScheduleEnd']) {
+        if (req.body[key] !== undefined) {
+            const value = String(req.body[key]);
+            if (!TIME_PATTERN.test(value)) return res.status(400).json({ error: `${key} must use HH:mm` });
+            current[key] = value;
+        }
+    }
     if (req.body.businessHours !== undefined) {
         if (!Array.isArray(req.body.businessHours) || req.body.businessHours.length > 7) return res.status(400).json({ error: 'businessHours is invalid' });
         current.businessHours = req.body.businessHours;
     }
+    const automationTimingChanged = previousAutomationTiming !== JSON.stringify({
+        autoCallEnabled: current.autoCallEnabled,
+        autoCallDelayMinutes: current.autoCallDelayMinutes,
+        autoCallIntervalMinutes: current.autoCallIntervalMinutes,
+        autoCallScheduleEnabled: current.autoCallScheduleEnabled,
+        autoCallScheduleStart: current.autoCallScheduleStart,
+        autoCallScheduleEnd: current.autoCallScheduleEnd
+    });
+    if (!current.autoCallEnabled || automationTimingChanged) current.nextAutoCallAt = null;
+    // Publish the new timing contract before touching queues. Reservations that
+    // arrive during realignment therefore always allocate against new values.
     await current.save();
     if (current.autoCallEnabled) {
         const session = await QueueSession.findOne({ storeId: req.auth.storeId, branchId: req.auth.branchId, status: 'active' }).lean();
         if (session) {
-            const delayMs = current.autoCallDelayMinutes * 60_000;
-            await Queue.updateMany(
-                {
-                    storeId: req.auth.storeId,
-                    branchId: req.auth.branchId,
-                    sessionId: session.sessionId,
-                    status: 'waiting',
-                    scheduledCallAt: null
-                },
-                [{ $set: { scheduledCallAt: { $add: ['$createdAt', delayMs] } } }]
-            );
+            if (automationTimingChanged) {
+                await Queue.updateMany(
+                    {
+                        storeId: req.auth.storeId,
+                        branchId: req.auth.branchId,
+                        sessionId: session.sessionId,
+                        status: 'waiting',
+                        manualAction: { $ne: true }
+                    },
+                    { $set: { scheduledCallAt: null } }
+                );
+            }
+            const lastScheduledAt = await scheduleUnassignedQueues(req.auth.storeId, req.auth.branchId, session.sessionId, current);
+            if (lastScheduledAt) {
+                await StoreSetting.updateOne({ _id: current._id }, { $max: { nextAutoCallAt: lastScheduledAt } });
+                current.nextAutoCallAt = lastScheduledAt;
+            }
         }
     }
     if (wasOpen && !current.queueOpen) await NotificationService.notifyStoreClosed(req.auth.storeId, req.auth.branchId);
-    res.json({ ...current.toObject(), serverTime: new Date().toISOString() });
+    res.json(settingsResponse(await StoreSetting.findById(current._id).lean()));
 });
 
 module.exports = router;
